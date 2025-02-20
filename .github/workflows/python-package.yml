@@ -3,7 +3,12 @@
 
 name: Workflow example
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    branches: ["test/workflow"]
+  pull_request:
+    branches: ["test/workflow"]
 
 jobs:
   build:
