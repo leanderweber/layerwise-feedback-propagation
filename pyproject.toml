@@ -1,7 +1,7 @@
 [tool.poetry]
 package-mode = true
 name = "lfprop"
-version = "0.1.0"
+version = "0.1.1"
 description = "A package for gradient-free neural network training using LFP"
 readme = "README.md"
 authors = [
@@ -80,7 +80,7 @@ full = [
 
 [project]
 name = "lfprop"
-version = "0.1.0"
+version = "0.1.1"
 description = "A package for gradient-free neural network training using LFP"
 readme = "README.md"
 license = { file = "LICENSE" }
