@@ -30,18 +30,18 @@ training_loader = torch.utils.data.DataLoader(training_data, batch_size=batch_si
 validation_loader = torch.utils.data.DataLoader(validation_data, batch_size=batch_size, shuffle=False)
 '''
 
-step = Step()
-sum = Sum()
+step_object = Step()
+sum_object = Sum()
 
 class TestMethods(unittest.TestCase):
 
     def test_step(self):
         
-        self.assertEqual(step.forward(torch.tensor(1)), 1)
-        self.assertEqual(step.forward(torch.tensor(-1)), 0)
-        self.assertEqual(step.forward(torch.tensor(0)), 0)
-        self.assertEqual(step.forward(torch.tensor(1e-9)), 1)
-        self.assertEqual(step.forward(torch.tensor(-1e-9)), 0)
+        self.assertEqual(step_object.forward(torch.tensor(1)), 1)
+        self.assertEqual(step_object.forward(torch.tensor(-1)), 0)
+        self.assertEqual(step_object.forward(torch.tensor(0)), 0)
+        self.assertEqual(step_object.forward(torch.tensor(1e-9)), 1)
+        self.assertEqual(step_object.forward(torch.tensor(-1e-9)), 0)
 
         #TODO does this also look at arrays/multi-element tensors?
 
