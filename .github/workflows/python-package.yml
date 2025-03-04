@@ -29,11 +29,8 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
-        sudo apt update
-        sudo apt install pipx
         python -m pip install --upgrade pip
         python -m pip install flake8 pytest
-        pipx install poetry
-        poetry install
+        python -m pip install lfprop
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         python -m unittest tests.methods
