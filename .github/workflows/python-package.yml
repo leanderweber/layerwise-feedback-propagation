@@ -29,5 +29,5 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
-        python -m pip install 'https://pypi.org/simple/lfprop/'
+        python -m pip install 'https://pypi.org/simple/lfprop/lfprop-0.1.0-py3-none-any.whl'
         python -m unittest tests.methods
