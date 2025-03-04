@@ -34,6 +34,4 @@ jobs:
         python -m pip install zennit
         python -m pip install lxt
         python -m pip install pytorch-lightning
-        cat requirements.txt | xargs pipx inject mkdocs
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         python -m unittest tests.methods
