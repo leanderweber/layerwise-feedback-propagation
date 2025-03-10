@@ -36,5 +36,4 @@ jobs:
         poetry install
         poetry export -f requirements.txt --without-hashes --extras full > requirements.txt
         python -m pip install -r requirements.txt
-        sed -i 's/sion >= "3.11"/sion >= "3.9"/g' requirements.txt
         python -m unittest tests.methods

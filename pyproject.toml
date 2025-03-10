@@ -49,7 +49,7 @@ exclude = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.11"
+python = ">=3.9"
 zennit = "^0.5.1"
 lxt = "^0.6.1"
 wandb = { version = "^0.19.4", optional = true }
