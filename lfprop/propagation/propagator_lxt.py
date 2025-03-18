@@ -1,17 +1,44 @@
-import math
-
 import torch
 from lxt import core as lcore
-from lxt import functional as lfunctional
-from lxt import modules as lmodules
 from lxt import rules as lrules
-from lxt import special as lspecial
 from lxt.modules import INIT_MODULE_MAPPING
 from torch import nn
+from zennit import core as zcore
+from zennit import rules as zrules
 from zennit import types as ztypes
 
 from ..model import activations
 from ..model.custom_resnet import Sum
+
+
+class DummyCompositeContext:
+    """
+    A context object to register a composite in a context and remove the associated hooks and canonizers afterwards.
+    Taken from the 'zennit' library for neural network interpretability.
+
+    This version can also pass **register_kwargs to register
+
+    Parameters
+    ----------
+    module: torch.nn.Module
+        The module to which composite should be registered.
+    composite: Composite
+        The composite which shall be registered to module.
+    """
+
+    def __init__(self, module, composite, verbose, **register_kwargs):
+        self.module = module
+        self.composite = composite
+        self.verbose = verbose
+        self.register_kwargs = register_kwargs
+
+    def __enter__(self):
+        self.composite.register(parent=self.module, verbose=self.verbose, **self.register_kwargs)
+        return self.module
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.composite.remove()
+        return False
 
 
 class ParameterizableComposite(lcore.Composite):
@@ -40,7 +67,7 @@ class ParameterizableComposite(lcore.Composite):
         dummy_inputs: dict = None,
         tracer=lcore.HFTracer,
         verbose=False,
-        no_grad=True,
+        no_grad=False,  # Set no_grad to false to allow param gradients
     ) -> None:
         # Activation "Canonization": remove inplace ops from activations, they don't work with LFP
         self._canonize_inplace_activations(parent)
@@ -92,6 +119,9 @@ class ParameterizableComposite(lcore.Composite):
 
         return child
 
+    def context(self, module, verbose=False, **register_kwargs):
+        return DummyCompositeContext(module, self, verbose, **register_kwargs)
+
 
 class RuleGenerator:
     def __init__(self, rule, **kwargs):
@@ -102,160 +132,44 @@ class RuleGenerator:
         return self.rule(module, **self.rule_kwargs)
 
 
-class LinearQProjection(nn.Module):
-    """
-    Custom nn.Linear module to make it easier to attach different rules to it.
-    """
-
-    def __init__(self, weight, bias):
-        super().__init__()
-
-        self.weight = weight
-        self.bias = bias
-
-    def forward(self, x):
-        return torch.nn.functional.linear(x, self.weight, self.bias)
-
-
-class LinearKProjection(nn.Module):
-    """
-    Custom nn.Linear module to make it easier to attach different rules to it.
-    """
-
-    def __init__(self, weight, bias):
-        super().__init__()
-
-        self.weight = weight
-        self.bias = bias
-
-    def forward(self, x):
-        return torch.nn.functional.linear(x, self.weight, self.bias)
-
-
-class LFPMultiheadAttention_CP(lmodules.MultiheadAttention_CP):
-    """
-    Replacement for Multiheadattention - Enables attachement of Rules
-    """
-
-    def __init__(self):
-        super().__init__()
-
-        self.q_proj = LinearQProjection(self.q_proj_weight, self.bias_q)
-        self.k_proj = LinearKProjection(self.k_proj_weight, self.bias_k)
-
-    def forward(
-        self,
-        query,
-        key,
-        value,
-        key_padding_mask=None,
-        need_weights=True,
-        attn_mask=None,
-        average_attn_weights=True,
-        is_causal=False,
-    ):
-        return lfp_multi_head_attention_cp(
-            query,
-            key,
-            value,
-            self.batch_first,
-            self.num_heads,
-            self.head_dim,
-            self.q_proj,
-            self.k_proj,
-            self.v_proj,
-            self.out_proj,
-            key_padding_mask,
-            need_weights,
-            attn_mask,
-            average_attn_weights,
-        )
-
-
-def lfp_multi_head_attention_cp(
-    query,
-    key,
-    value,
-    batch_first,
-    num_heads,
-    head_dim,
-    q_proj,
-    k_proj,
-    v_proj,
-    out_proj,
-    key_padding_mask=None,
-    need_weights=True,
-    attn_mask=None,
-    average_attn_weights=True,
-):
-    if batch_first is False:
-        query = query.transpose(0, 1)
-        key = key.transpose(0, 1)
-        value = value.transpose(0, 1)
-
-    batch_size, q_seq_length, embed_dim = query.shape
-    _, v_seq_length, _ = value.shape
-
-    # -- project inputs to new embedding
-    q = q_proj(query)
-    k = k_proj(key)
-    v = v_proj(value)
-
-    # -- reshape for multiheadattention
-    q = q.view(batch_size, q_seq_length, num_heads, head_dim)
-    k = k.view(batch_size, v_seq_length, num_heads, head_dim)
-    v = v.view(batch_size, v_seq_length, num_heads, head_dim)
-
-    q = q.permute(0, 2, 1, 3)  # [Batch, Head, SeqLen, Embed]
-    k = k.permute(0, 2, 1, 3)
-    v = v.permute(0, 2, 1, 3)
-
-    # -- perform attention on each head
-    # TODO: replace with the correct wrapper/operation; see e.g. llama.py in LXT
-    attn_logits = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(q.shape[-1])
-
-    mask = torch.zeros_like(attn_logits).to(attn_logits)
-    if key_padding_mask is not None:
-        mask += lspecial._prepare_key_padding_mask(key_padding_mask, attn_mask, q)
-    if attn_mask is not None:
-        mask += lspecial._prepare_attn_mask(attn_mask, q)
-
-    attn_logits = attn_logits + mask
-
-    # TODO: replace with the correct wrapper/operation
-    attention = torch.softmax(attn_logits, -1)
-
-    # TODO: replace with the correct wrapper/operation
-    y = epsilon_lfp_fn.apply(torch.matmul, 1e-6, attention, v)
-
-    # -- out projection
-    y = y.permute(0, 2, 1, 3)
-    y = y.reshape(batch_size, q_seq_length, embed_dim)
-    out = out_proj(y)
-
-    if batch_first is False:
-        out = out.transpose(0, 1)
-
-    if need_weights and average_attn_weights:
-        return out, attention.mean(dim=1)
-    elif need_weights:
-        return out, attention
-    else:
-        return out, None
-
-
 class LFPEpsilon(lrules.EpsilonRule):
     """
     LFP Epsilon Rule
+    If hebbian = True, a hebbian update (d_w = |w_ij| * a_i*z_j) will be employed instead of the original LFP update.
+    Reward backward pass will not be affected by this parameter, only the local weight updates.
+    If use_oja = True, Oja's rule will replace a_i*z_j with z_j*(a_i-z_j*w_ij)
     """
 
-    def __init__(self, module, epsilon=1e-6, norm_backward=False, inplace=True):
+    def __init__(self, module, epsilon=1e-6, inplace=True, hebbian=False, use_oja=False):
         super(LFPEpsilon, self).__init__(module, epsilon)
-        self.norm_backward = norm_backward
         self.inplace = inplace
+        self.hebbian = hebbian
+        self.use_oja = use_oja
+
+        # This is needed for compatibility with L631 in modeling_vit.py from transformers library
+        if hasattr(module, "weight"):
+            self.weight = module.weight
 
     def forward(self, *inputs):
-        return epsilon_lfp_fn.apply(self.module, self.epsilon, self.norm_backward, self.inplace, *inputs)
+        return epsilon_lfp_fn.apply(self.module, self.epsilon, self.inplace, self.hebbian, self.use_oja, *inputs)
+
+
+class LFPGamma(lrules.EpsilonRule):
+    """
+    LFP Gamma Rule
+    """
+
+    def __init__(self, module, epsilon=1e-6, gamma=0.25, inplace=True):
+        super(LFPGamma, self).__init__(module, epsilon)
+        self.gamma = gamma
+        self.inplace = inplace
+
+        # This is needed for compatibility with L631 in modeling_vit.py from transformers library
+        if hasattr(module, "weight"):
+            self.weight = module.weight
+
+    def forward(self, *inputs):
+        return gamma_lfp_fn.apply(self.module, self.epsilon, self.gamma, self.inplace, *inputs)
 
 
 class epsilon_lfp_fn(lrules.epsilon_lrp_fn):
@@ -264,31 +178,26 @@ class epsilon_lfp_fn(lrules.epsilon_lrp_fn):
     """
 
     @staticmethod
-    def forward(ctx, fn, epsilon, norm_backward, inplace, *inputs):
+    def forward(ctx, fn, epsilon, inplace, hebbian, use_oja, *inputs):
         # create boolean mask for inputs requiring gradients
         requires_grads = [True if inp.requires_grad else False for inp in inputs]
-        if sum(requires_grads) == 0:
-            # no gradients to compute or gradient checkpointing is used
-            return fn(*inputs)
 
         # detach inputs to avoid overwriting gradients if same input is used as multiple arguments
         # (like in self-attention)
         inputs = tuple(inp.detach().requires_grad_() if inp.requires_grad else inp for inp in inputs)
 
         # get parameters to store for backward. Here, we want to accumulate reward, so we do not detach
-        params = [param for _, param in fn.named_parameters(recurse=False)]
-
-        for param in params:
-            param.requires_grad_()
+        params = [param for _, param in fn.named_parameters(recurse=False) if param.requires_grad]
 
         with torch.enable_grad():
             outputs = fn(*inputs)
 
-        ctx.epsilon, ctx.norm_backward, ctx.requires_grads, ctx.inplace = (
+        ctx.epsilon, ctx.requires_grads, ctx.inplace, ctx.hebbian, ctx.use_oja = (
             epsilon,
-            norm_backward,
             requires_grads,
             inplace,
+            hebbian,
+            use_oja,
         )
         # save only inputs requiring gradients
         inputs = tuple(inputs[i] for i in range(len(inputs)) if requires_grads[i])
@@ -301,56 +210,92 @@ class epsilon_lfp_fn(lrules.epsilon_lrp_fn):
 
     @staticmethod
     def backward(ctx, *incoming_reward):
-        if ctx.norm_backward:
-            if isinstance(incoming_reward, tuple):
-                incoming_reward_new = []
-                for g in incoming_reward:
-                    if g is not None:
-                        incoming_reward_new.append(
-                            g
-                            / torch.where(
-                                g.abs().max() > 0,
-                                g.abs().max(),
-                                torch.ones_like(g.abs().max()),
-                            )
-                        )
-                    else:
-                        incoming_reward_new.append(None)
-                incoming_reward = tuple(incoming_reward_new)
-            else:
-                if incoming_reward is not None:
-                    incoming_reward = incoming_reward / torch.where(
-                        incoming_reward.abs().max() > 0,
-                        incoming_reward.abs().max(),
-                        torch.ones_like(incoming_reward.abs().max()),
-                    )
-                else:
-                    incoming_reward = None
-
-        # if isinstance(ctx.fn, Sum):
-        #     print([i.abs().max() for i in incoming_reward])
-
         outputs = ctx.saved_tensors[-1]
         inputs = ctx.saved_tensors[: ctx.n_inputs]
         params = ctx.saved_tensors[ctx.n_inputs : ctx.n_inputs + ctx.n_params]
 
-        # print("OUTPUTS", outputs)
-        # print("RELEVANCE", incoming_reward[0])
+        print_debug = False
 
-        normed_reward = incoming_reward[0] / lfunctional._stabilize(outputs, ctx.epsilon, inplace=False)
+        if print_debug:
+            if hasattr(ctx.fn, "tmpname"):
+                print(ctx.fn.tmpname)
+            if hasattr(ctx.fn, "weight"):
+                print(ctx.fn.weight.abs().min(), ctx.fn.weight.abs().max())
+            # if isinstance(incoming_reward, tuple):
+            #    print("IN", [inc.abs().mean() for inc in incoming_reward])
+            # else:
+            #    print("IN", incoming_reward.abs().mean())
+
+        normed_reward = incoming_reward[0] / zcore.stabilize(
+            outputs, ctx.epsilon, clip=False, norm_scale=False, dim=None
+        )
 
         # compute param reward (used to update parameters)
-        for param in params:
-            if not isinstance(param, tuple):
-                param = (param,)  # noqa: PLW2901
-            param_grads = torch.autograd.grad(outputs, param, normed_reward, retain_graph=True)
-            if ctx.inplace:
-                param_reward = tuple(param_grads[i].mul_(param[i].abs()) for i in range(len(param)))
-            else:
-                param_reward = tuple(param_grads[i] * param[i].abs() for i in range(len(param)))
-            for i in range(len(param)):
-                param[i].feedback = param_reward[i]
-                # print(param[i].feedback.abs().max())
+        if ctx.hebbian:
+            hebb_reward = incoming_reward[0] * outputs
+
+            if ctx.use_oja:
+                oja_placeholder_outgrad = outputs**3
+
+            for param in params:
+                if not isinstance(param, tuple):
+                    param = (param,)  # noqa: PLW2901
+                param_grads = torch.autograd.grad(
+                    outputs, param, hebb_reward, retain_graph=True
+                )  # a_i * z_j * r_j. Btw, no eps required here.
+
+                if ctx.use_oja:
+                    oja_factor_num = torch.autograd.grad(outputs, param, oja_placeholder_outgrad, retain_graph=True)
+                    oja_factor_denom = torch.autograd.grad(outputs, param, outputs, retain_graph=True)
+                    oja_factor = tuple(
+                        torch.where(
+                            oja_factor_denom[i] != 0,
+                            oja_factor_num[i] / oja_factor_denom[i],
+                            oja_factor_num[i],
+                        )
+                        * param[i]
+                        for i in range(len(param))
+                    )  # z_j^3*a_j/z_j*a_j * w_ij = z_j**2*w_ij
+
+                    param_reward = tuple(
+                        param_grads[i] - oja_factor[i] for i in range(len(param))
+                    )  # z_j * (a_i - z_j*w_ij) * r_j
+                else:
+                    param_reward = tuple(param_grads)
+
+                param_reward = tuple(param_reward[i] * param[i].abs() for i in range(len(param)))
+
+                for i in range(len(param)):
+                    # The below block applies activation thresholding,
+                    # which can be beneficial for hebbian learning
+                    # if not hasattr(param[i], "feedback_sum"):
+                    #     param[i].feedback_sum = 0
+                    #     param[i].feedback_cnt = 0
+                    #     param[i].feedback = param_reward[i]
+                    # else:
+                    #     param[i].feedback = (
+                    #         param_reward[i]
+                    #         - 1 / param[i].feedback_cnt * param[i].feedback_sum
+                    #     )
+
+                    # param[i].feedback_sum += param_reward[i]
+                    # param[i].feedback_cnt += 1
+
+                    # Alternatively, this is without activation thresholding
+                    param[i].feedback = param_reward[i]
+        else:
+            for param in params:
+                if not isinstance(param, tuple):
+                    param = (param,)  # noqa: PLW2901
+                param_grads = torch.autograd.grad(
+                    outputs, param, normed_reward, retain_graph=True
+                )  # a_i * r_j/(z_j+eps)
+                if ctx.inplace:
+                    param_reward = tuple(param_grads[i].mul_(param[i].abs()) for i in range(len(param)))
+                else:
+                    param_reward = tuple(param_grads[i] * param[i].abs() for i in range(len(param)))
+                for i in range(len(param)):
+                    param[i].feedback = param_reward[i]
 
         # compute input reward (= outgoing reward to propagate)
         input_grads = torch.autograd.grad(outputs, inputs, normed_reward, retain_graph=False)
@@ -366,147 +311,257 @@ class epsilon_lfp_fn(lrules.epsilon_lrp_fn):
             )
 
         # return relevance at requires_grad indices else None
+        return (None, None, None, None, None) + outgoing_reward
+
+
+# TODO Something is wrong with this. Check backward pass computation.
+class gamma_lfp_fn(lrules.epsilon_lrp_fn):
+    """
+    LFP Gamma Rule.
+    Note: Gamma is only applied to backpropagate reward. Weights are updated using epsilon.
+    """
+
+    @staticmethod
+    def forward(ctx, fn, epsilon, gamma, inplace, *inputs):
+        mod_kwargs = {"zero_params": None}
+        mod_kwargs_nobias = {"zero_params": zrules.zero_bias(None)}
+
+        # create boolean mask for inputs requiring gradients
+        requires_grads = [True if inp.requires_grad else False for inp in inputs]
+
+        # create boolean mask for params requiring gradients
+        requires_grads_params = [
+            True if param.requires_grad else False for _, param in fn.named_parameters(recurse=False)
+        ]
+
+        # modify inputs for gamma rule
+        mod_inputs = [
+            tuple(inp.clamp(min=0) for inp in inputs),
+            tuple(inp.clamp(max=0) for inp in inputs),
+            tuple(inp.clamp(min=0) for inp in inputs),
+            tuple(inp.clamp(max=0) for inp in inputs),
+            inputs,
+        ]
+
+        # detach inputs to avoid overwriting gradients if same input is used as multiple arguments
+        # (like in self-attention)
+        mod_inputs = [
+            tuple(
+                (mod_input[i].detach().requires_grad_() if requires_grads[i] else mod_input[i])
+                for i in range(len(mod_input))
+            )
+            for mod_input in mod_inputs
+        ]
+
+        # get parameters to store for backward. Here, we want to accumulate reward, so we do not detach
+        orig_params = [param for _, param in fn.named_parameters(recurse=False) if param.requires_grad]
+
+        # modify params for gamma rule
+        param_mods = [
+            zrules.GammaMod(gamma, min=0.0, **mod_kwargs),
+            zrules.GammaMod(gamma, max=0.0, **mod_kwargs_nobias),
+            zrules.GammaMod(gamma, max=0.0, **mod_kwargs),
+            zrules.GammaMod(gamma, min=0.0, **mod_kwargs_nobias),
+            zrules.NoMod(),
+        ]
+
+        # Zennit-like
+        mod_outputs = []
+        with torch.enable_grad():
+            for p, param_mod in enumerate(param_mods):
+                with zcore.ParamMod.ensure(param_mod)(fn) as mod_fn:
+                    # Ensure requires_grad for the last mod only
+                    for i, (name, param) in enumerate(mod_fn.named_parameters(recurse=False)):
+                        if p == len(param_mods) - 1 and requires_grads_params[i]:
+                            getattr(mod_fn, name).data = param.detach().requires_grad_()
+                        else:
+                            param.requires_grad_(False)
+
+                    mod_outputs.append(mod_fn(*mod_inputs[p]))
+
+                    # We only save the last parameter mod
+                    if p == len(param_mods) - 1:
+                        mod_params = [
+                            param for _, param in mod_fn.named_parameters(recurse=False) if param.requires_grad
+                        ]
+
+        ctx.epsilon, ctx.gamma, ctx.requires_grads, ctx.inplace = (
+            epsilon,
+            gamma,
+            requires_grads,
+            inplace,
+        )
+        # save only inputs requiring gradients
+        mod_inputs_backward = []
+        for mod_input in mod_inputs:
+            tmp = [mod_input[i] for i in range(len(mod_input)) if requires_grads[i]]
+            n_inputs = len(tmp)
+            mod_inputs_backward += tmp
+        mod_inputs_backward = tuple(mod_inputs_backward)
+        ctx.save_for_backward(*orig_params, *mod_params, *mod_outputs, *mod_inputs_backward)
+
+        ctx.n_mods, ctx.n_inputs, ctx.n_params = (
+            len(mod_outputs),
+            n_inputs,
+            len(orig_params),
+        )
+        ctx.fn = fn
+
+        return mod_outputs[4].detach()
+
+    @staticmethod
+    def backward(ctx, *incoming_reward):
+        print_debug = False
+
+        if print_debug:
+            if hasattr(ctx.fn, "tmpname"):
+                print(ctx.fn.tmpname, ctx.epsilon, ctx.gamma, ctx.fn)
+            if hasattr(ctx.fn, "weight"):
+                print(ctx.fn.weight.shape)
+            if isinstance(incoming_reward, tuple):
+                print("IN", [inc.abs().mean() for inc in incoming_reward])
+            else:
+                print("IN", incoming_reward.abs().mean())
+
+        params = ctx.saved_tensors[: ctx.n_params]
+        mod_params = ctx.saved_tensors[ctx.n_params : 2 * ctx.n_params]
+        mod_outputs = ctx.saved_tensors[2 * ctx.n_params : 2 * ctx.n_params + ctx.n_mods]
+        mod_inputs = []
+        for i in range(ctx.n_mods):
+            mod_inputs += [
+                ctx.saved_tensors[
+                    2 * ctx.n_params + ctx.n_mods + i * ctx.n_inputs : 2 * ctx.n_params
+                    + ctx.n_mods
+                    + (i + 1) * ctx.n_inputs
+                ]
+            ]
+
+        # compute param reward (used to update parameters)
+        # Here, we use standard epsilon to update
+        normed_reward = incoming_reward[0] / zcore.stabilize(
+            mod_outputs[-1], ctx.epsilon, clip=False, norm_scale=True, dim=None
+        )
+        for m_param, orig_param in zip(mod_params, params):
+            if not isinstance(m_param, tuple):
+                m_param = (m_param,)  # noqa: PLW2901
+            if not isinstance(orig_param, tuple):
+                orig_param = (orig_param,)  # noqa: PLW2901
+            param_grads = torch.autograd.grad(mod_outputs[-1], m_param, normed_reward, retain_graph=True)
+            if ctx.inplace:
+                param_reward = tuple(param_grads[i].mul_(m_param[i].abs()) for i in range(len(m_param)))
+            else:
+                param_reward = tuple(param_grads[i] * m_param[i].abs() for i in range(len(m_param)))
+            for i in range(len(m_param)):
+                orig_param[i].feedback = param_reward[i]
+
+        # compute input reward (= outgoing reward to propagate)
+        # Here, we employ the gamma-rule
+        mod_normed_rewards = [
+            mod_outputs[-1]
+            > 0
+            * incoming_reward[0]
+            / zcore.stabilize(sum(mod_outputs[:2]), ctx.epsilon, clip=False, norm_scale=True, dim=None),
+            mod_outputs[-1]
+            > 0
+            * incoming_reward[0]
+            / zcore.stabilize(sum(mod_outputs[:2]), ctx.epsilon, clip=False, norm_scale=True, dim=None),
+            mod_outputs[-1]
+            < 0
+            * incoming_reward[0]
+            / zcore.stabilize(sum(mod_outputs[:2]), ctx.epsilon, clip=False, norm_scale=True, dim=None),
+            mod_outputs[-1]
+            < 0
+            * incoming_reward[0]
+            / zcore.stabilize(sum(mod_outputs[:2]), ctx.epsilon, clip=False, norm_scale=True, dim=None),
+        ]
+
+        mod_input_grads = [
+            torch.autograd.grad(mod_outputs[i], mod_inputs[i], mod_normed_rewards[i], retain_graph=False)
+            for i in range(ctx.n_mods - 1)
+        ]
+
+        reduced = []
+        for n in range(len(ctx.requires_grads)):
+            if not ctx.requires_grads[n]:
+                reduced.append(None)
+            else:
+                if ctx.inplace:
+                    reduced.append(sum(mod_input_grads[m][n].mul_(mod_inputs[m][n]) for m in range(ctx.n_mods - 1)))
+                else:
+                    reduced.append(sum(mod_input_grads[m][n] * mod_inputs[m][n] for m in range(ctx.n_mods - 1)))
+        outgoing_reward = tuple(reduced)
+
+        if print_debug:
+            if isinstance(outgoing_reward, tuple):
+                print(
+                    "OUT",
+                    [inc.abs().mean() if inc is not None else None for inc in outgoing_reward],
+                )
+            else:
+                print("OUT", outgoing_reward.abs().mean())
+
+        # return relevance at requires_grad indices else None
         return (None, None, None, None) + outgoing_reward
 
 
-# class gamma_lfp_fn(lrules.epsilon_lrp_fn):
-#     """
-#     LFP Gamma Rule
-#     """
-
-#     @staticmethod
-#     def forward(ctx, fn, epsilon, norm_backward, inplace, *inputs):
-#         # create boolean mask for inputs requiring gradients
-#         requires_grads = [True if inp.requires_grad else False for inp in inputs]
-#         if sum(requires_grads) == 0:
-#             # no gradients to compute or gradient checkpointing is used
-#             return fn(*inputs)
-
-#         # detach inputs to avoid overwriting gradients if same input is used as multiple arguments
-#         # (like in self-attention)
-#         inputs = tuple(
-#             inp.detach().requires_grad_() if inp.requires_grad else inp
-#             for inp in inputs
-#         )
-
-#         # get parameters to store for backward. Here, we want to accumulate reward, so we do not detach
-#         params = [param for _, param in fn.named_parameters(recurse=False)]
-
-#         for param in params:
-#             param.requires_grad_()
-
-#         with torch.enable_grad():
-#             outputs = fn(*inputs)
-
-#         ctx.epsilon, ctx.norm_backward, ctx.requires_grads, ctx.inplace = (
-#             epsilon,
-#             norm_backward,
-#             requires_grads,
-#             inplace,
-#         )
-#         # save only inputs requiring gradients
-#         inputs = tuple(inputs[i] for i in range(len(inputs)) if requires_grads[i])
-#         ctx.save_for_backward(*inputs, *params, outputs)
-
-#         ctx.n_inputs, ctx.n_params = len(inputs), len(params)
-#         ctx.fn = fn
-
-#         return outputs.detach()
-
-#     @staticmethod
-#     def backward(ctx, *incoming_reward):
-#         if ctx.norm_backward:
-#             if isinstance(incoming_reward, tuple):
-#                 incoming_reward_new = []
-#                 for g in incoming_reward:
-#                     if g is not None:
-#                         incoming_reward_new.append(
-#                             g
-#                             / torch.where(
-#                                 g.abs().max() > 0,
-#                                 g.abs().max(),
-#                                 torch.ones_like(g.abs().max()),
-#                             )
-#                         )
-#                     else:
-#                         incoming_reward_new.append(None)
-#                 incoming_reward = tuple(incoming_reward_new)
-#             else:
-#                 if incoming_reward is not None:
-#                     incoming_reward = incoming_reward / torch.where(
-#                         incoming_reward.abs().max() > 0,
-#                         incoming_reward.abs().max(),
-#                         torch.ones_like(incoming_reward.abs().max()),
-#                     )
-#                 else:
-#                     incoming_reward = None
-
-#         # if isinstance(ctx.fn, Sum):
-#         #     print([i.abs().max() for i in incoming_reward])
-
-#         outputs = ctx.saved_tensors[-1]
-#         inputs = ctx.saved_tensors[: ctx.n_inputs]
-#         params = ctx.saved_tensors[ctx.n_inputs : ctx.n_inputs + ctx.n_params]
-
-#         # print("OUTPUTS", outputs)
-#         # print("RELEVANCE", incoming_reward[0])
-
-#         normed_reward = incoming_reward[0] / lfunctional._stabilize(
-#             outputs, ctx.epsilon, inplace=False
-#         )
-
-#         # TODO: Update Param Feedback with LFP-Epsilon (Or even with LFP-Zero?)
-#         # compute param reward (used to update parameters)
-#         for param in params:
-#             if not isinstance(param, tuple):
-#                 param = (param,)  # noqa: PLW2901
-#             param_grads = torch.autograd.grad(
-#                 outputs, param, normed_reward, retain_graph=True
-#             )
-#             if ctx.inplace:
-#                 param_reward = tuple(
-#                     param_grads[i].mul_(param[i].abs()) for i in range(len(param))
-#                 )
-#             else:
-#                 param_reward = tuple(
-#                     param_grads[i] * param[i].abs() for i in range(len(param))
-#                 )
-#             for i in range(len(param)):
-#                 param[i].feedback = param_reward[i]
-#                 # print(param[i].feedback.abs().max())
-
-#         # compute input reward (= outgoing reward to propagate)
-#         # Here, Apply gamma-rule for (denoised) backward propagation
-#         input_grads = torch.autograd.grad(
-#             outputs, inputs, normed_reward, retain_graph=False
-#         )
-
-#         if ctx.inplace:
-#             outgoing_reward = tuple(
-#                 input_grads[i].mul_(inputs[i]) if ctx.requires_grads[i] else None
-#                 for i in range(len(ctx.requires_grads))
-#             )
-#         else:
-#             outgoing_reward = tuple(
-#                 input_grads[i] * inputs[i] if ctx.requires_grads[i] else None
-#                 for i in range(len(ctx.requires_grads))
-#             )
-
-#         # return relevance at requires_grad indices else None
-#         return (None, None, None, None) + outgoing_reward
-
-
 class LFPEpsilonComposite(ParameterizableComposite):
-    def __init__(self, norm_backward=False, epsilon=1e-6):
+    def __init__(self, epsilon=1e-6):
         layer_map = {
             ztypes.Activation: lrules.IdentityRule,
             activations.Step: lrules.IdentityRule,
-            Sum: RuleGenerator(LFPEpsilon, epsilon=epsilon, norm_backward=False, inplace=False),
-            ztypes.AvgPool: RuleGenerator(LFPEpsilon, epsilon=epsilon, norm_backward=False),
-            ztypes.Linear: RuleGenerator(LFPEpsilon, epsilon=epsilon, norm_backward=norm_backward),
-            ztypes.BatchNorm: RuleGenerator(LFPEpsilon, epsilon=epsilon, norm_backward=norm_backward),
+            Sum: RuleGenerator(LFPEpsilon, epsilon=epsilon, inplace=False),
+            ztypes.AvgPool: RuleGenerator(
+                LFPEpsilon,
+                epsilon=epsilon,
+            ),
+            ztypes.Linear: RuleGenerator(
+                LFPEpsilon,
+                epsilon=epsilon,
+            ),
+            ztypes.BatchNorm: RuleGenerator(
+                LFPEpsilon,
+                epsilon=epsilon,
+            ),
         }
 
         super().__init__(layer_map=layer_map)
+
+
+class LFPHebbianEpsilonComposite(ParameterizableComposite):
+    def __init__(self, epsilon=1e-6, use_oja=False):
+        layer_map = {
+            ztypes.Activation: lrules.IdentityRule,
+            activations.Step: lrules.IdentityRule,
+            Sum: RuleGenerator(
+                LFPEpsilon,
+                epsilon=epsilon,
+                inplace=False,
+                hebbian=True,
+                use_oja=use_oja,
+            ),
+            ztypes.AvgPool: RuleGenerator(LFPEpsilon, epsilon=epsilon, hebbian=True, use_oja=use_oja),
+            ztypes.Linear: RuleGenerator(LFPEpsilon, epsilon=epsilon, hebbian=True, use_oja=use_oja),
+            ztypes.BatchNorm: RuleGenerator(LFPEpsilon, epsilon=epsilon, hebbian=True, use_oja=use_oja),
+        }
+
         super().__init__(layer_map=layer_map)
+
+
+class LFPGammaComposite(ParameterizableComposite):
+    def __init__(self, epsilon=1e-6, gamma=0.25):
+        layer_map = {
+            ztypes.Activation: lrules.IdentityRule,
+            activations.Step: lrules.IdentityRule,
+            Sum: RuleGenerator(LFPEpsilon, epsilon=epsilon, inplace=False),
+            ztypes.AvgPool: RuleGenerator(
+                LFPEpsilon,
+                epsilon=epsilon,
+            ),
+            ztypes.Linear: RuleGenerator(LFPGamma, epsilon=epsilon, gamma=gamma),
+            ztypes.BatchNorm: RuleGenerator(
+                LFPEpsilon,
+                epsilon=epsilon,
+            ),
+        }
+
         super().__init__(layer_map=layer_map)

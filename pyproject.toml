@@ -62,9 +62,10 @@ torcheval = { version = "^0.0.7", optional = true }
 snntorch = { version = "^0.9.1", optional = true }
 pytorch-lightning = { version = "^2.5.0.post0", optional = true }
 open-clip-torch = { version = "^2.31.0", optional = true }
+datasets = { version = "^3.3.2", optional = true }
 
 [tool.poetry.extras]
-quickstart = ["notebook", "torcheval", "snntorch", "open-clip-torch"]
+quickstart = ["notebook", "torcheval", "snntorch", "open-clip-torch", "datasets"]
 snn = ["snntorch"]
 full = [
     "wandb",
@@ -76,7 +77,8 @@ full = [
     "torcheval",
     "snntorch",
     "pytorch-lightning",
-    "open-clip-torch"
+    "open-clip-torch",
+    "datasets"
 ]
 
 

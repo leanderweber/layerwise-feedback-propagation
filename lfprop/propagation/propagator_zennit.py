@@ -143,7 +143,6 @@ class LFPHook(zcore.Hook):
 
     def __init__(
         self,
-        norm_backward,
         input_modifiers=None,
         param_modifiers=None,
         output_modifiers=None,
@@ -155,7 +154,6 @@ class LFPHook(zcore.Hook):
     ):
         super().__init__()
 
-        self.norm_backward = norm_backward
         self.is_bn = is_bn
 
         modifiers = {
@@ -191,33 +189,6 @@ class LFPHook(zcore.Hook):
         :param layer:
         :return:
         """
-
-        # Backwards Norm
-        if self.norm_backward:
-            if isinstance(grad_output, tuple):
-                grad_output_new = []
-                for g in grad_output:
-                    if g is not None:
-                        grad_output_new.append(
-                            g
-                            / torch.where(
-                                g.abs().max() > 0,
-                                g.abs().max(),
-                                torch.ones_like(g.abs().max()),
-                            )
-                        )
-                    else:
-                        grad_output_new.append(None)
-                grad_output = tuple(grad_output_new)
-            else:
-                if grad_output is not None:
-                    grad_output = grad_output / torch.where(
-                        grad_output.abs().max() > 0,
-                        grad_output.abs().max(),
-                        torch.ones_like(grad_output.abs().max()),
-                    )
-                else:
-                    grad_output = None
 
         original_input = self.stored_tensors["input"][0].detach()
         param_kwargs = dict(param_keys=self.param_keys, require_params=self.require_params)
@@ -277,7 +248,6 @@ class LFPHook(zcore.Hook):
         This is used to describe hooks of different modules by a single hook instance.
         """
         return LFPHook(
-            self.norm_backward,
             self.input_modifiers,
             self.param_modifiers,
             self.output_modifiers,
@@ -324,18 +294,17 @@ class LFPEpsilon(LFPHook):
 class LFPEpsilonComposite(SpecialFirstNamedLayerMapComposite):
     def __init__(
         self,
-        norm_backward=False,
         epsilon=1e-6,
         canonizers=None,
     ):
         layer_map = LAYER_MAP_BASE + [
             (
                 ztypes.Linear,
-                LFPEpsilon(norm_backward=norm_backward, epsilon=epsilon),
+                LFPEpsilon(epsilon=epsilon),
             ),
             (
                 ztypes.BatchNorm,
-                LFPEpsilon(norm_backward=norm_backward, epsilon=epsilon),
+                LFPEpsilon(epsilon=epsilon),
             ),
         ]
         name_map = []
