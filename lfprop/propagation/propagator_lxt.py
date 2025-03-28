@@ -92,7 +92,15 @@ class ParameterizableComposite(lcore.Composite):
 
         for layer_type, rule in rule_dict.items():
             # check if the layer_type is a string and or if the layer_type is a class and the child is an instance of it
-            if (isinstance(layer_type, str) and layer_type == child) or isinstance(child, layer_type):
+
+            check = False
+            if isinstance(layer_type, str):
+                if layer_type == name:
+                    check = True
+            elif isinstance(child, layer_type):
+                check = True
+
+            if check:
                 if isinstance(rule, type) and issubclass(rule, lrules.WrapModule):
                     # replace module with LXT.rules.WrapModule and attach it to parent as attribute
                     xai_module = rule(child)
@@ -140,18 +148,38 @@ class LFPEpsilon(lrules.EpsilonRule):
     If use_oja = True, Oja's rule will replace a_i*z_j with z_j*(a_i-z_j*w_ij)
     """
 
-    def __init__(self, module, epsilon=1e-6, inplace=True, hebbian=False, use_oja=False):
+    def __init__(
+        self,
+        module,
+        epsilon=1e-6,
+        inplace=True,
+        hebbian=False,
+        use_oja=False,
+        reverse_pos=False,
+        reverse_neg=False,
+    ):
         super(LFPEpsilon, self).__init__(module, epsilon)
         self.inplace = inplace
         self.hebbian = hebbian
         self.use_oja = use_oja
+        self.reverse_pos = reverse_pos
+        self.reverse_neg = reverse_neg
 
         # This is needed for compatibility with L631 in modeling_vit.py from transformers library
         if hasattr(module, "weight"):
             self.weight = module.weight
 
     def forward(self, *inputs):
-        return epsilon_lfp_fn.apply(self.module, self.epsilon, self.inplace, self.hebbian, self.use_oja, *inputs)
+        return epsilon_lfp_fn.apply(
+            self.module,
+            self.epsilon,
+            self.inplace,
+            self.hebbian,
+            self.use_oja,
+            self.reverse_pos,
+            self.reverse_neg,
+            *inputs,
+        )
 
 
 class LFPGamma(lrules.EpsilonRule):
@@ -178,7 +206,7 @@ class epsilon_lfp_fn(lrules.epsilon_lrp_fn):
     """
 
     @staticmethod
-    def forward(ctx, fn, epsilon, inplace, hebbian, use_oja, *inputs):
+    def forward(ctx, fn, epsilon, inplace, hebbian, use_oja, reverse_pos, reverse_neg, *inputs):
         # create boolean mask for inputs requiring gradients
         requires_grads = [True if inp.requires_grad else False for inp in inputs]
 
@@ -192,12 +220,22 @@ class epsilon_lfp_fn(lrules.epsilon_lrp_fn):
         with torch.enable_grad():
             outputs = fn(*inputs)
 
-        ctx.epsilon, ctx.requires_grads, ctx.inplace, ctx.hebbian, ctx.use_oja = (
+        (
+            ctx.epsilon,
+            ctx.requires_grads,
+            ctx.inplace,
+            ctx.hebbian,
+            ctx.use_oja,
+            ctx.reverse_pos,
+            ctx.reverse_neg,
+        ) = (
             epsilon,
             requires_grads,
             inplace,
             hebbian,
             use_oja,
+            reverse_pos,
+            reverse_neg,
         )
         # save only inputs requiring gradients
         inputs = tuple(inputs[i] for i in range(len(inputs)) if requires_grads[i])
@@ -221,10 +259,15 @@ class epsilon_lfp_fn(lrules.epsilon_lrp_fn):
                 print(ctx.fn.tmpname)
             if hasattr(ctx.fn, "weight"):
                 print(ctx.fn.weight.abs().min(), ctx.fn.weight.abs().max())
-            # if isinstance(incoming_reward, tuple):
-            #    print("IN", [inc.abs().mean() for inc in incoming_reward])
-            # else:
-            #    print("IN", incoming_reward.abs().mean())
+
+        if ctx.reverse_pos:
+            incoming_reward = tuple(
+                torch.where(outputs > 0, -incoming_reward[i], incoming_reward[i]) for i in range(len(incoming_reward))
+            )
+        if ctx.reverse_neg:
+            incoming_reward = tuple(
+                torch.where(outputs < 0, -incoming_reward[i], incoming_reward[i]) for i in range(len(incoming_reward))
+            )
 
         normed_reward = incoming_reward[0] / zcore.stabilize(
             outputs, ctx.epsilon, clip=False, norm_scale=False, dim=None
@@ -311,7 +354,7 @@ class epsilon_lfp_fn(lrules.epsilon_lrp_fn):
             )
 
         # return relevance at requires_grad indices else None
-        return (None, None, None, None, None) + outgoing_reward
+        return (None, None, None, None, None, None, None) + outgoing_reward
 
 
 # TODO Something is wrong with this. Check backward pass computation.

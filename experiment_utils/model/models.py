@@ -29,6 +29,10 @@ ACTIVATION_MAP = {
     "tanh": torch.nn.Tanh,
     "elu": torch.nn.ELU,
     "step": activations.Step,
+    "negtanh": activations.NegTanh,
+    "negrelu": activations.NegReLU,
+    "neginnerrelu": activations.NegInnerReLU,
+    "negstep": activations.NegStep,
 }
 
 EXCLUDED_MODULE_TYPES = [
