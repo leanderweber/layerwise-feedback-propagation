@@ -32,7 +32,7 @@ training_loader = torch.utils.data.DataLoader(training_data, batch_size=batch_si
 validation_loader = torch.utils.data.DataLoader(validation_data, batch_size=batch_size, shuffle=False)
 '''
 
-hook_object = prop_z.LFPHook(True, input_modifiers=[lambda input: input])
+hook_object = prop_z.LFPHook(True, input_modifiers=[lambda inp: inp])
 epsilon_object = prop_z.LFPEpsilon(True)
 
 # to test composites
@@ -70,9 +70,9 @@ class TestZennitPropagation(unittest.TestCase):
     def test_save_input_hook(self):
         # tests 'saved_input' attribute of module
         model = tnn.Linear(4, 2)
-        input = t(np.zeros(4)).uniform_()[None, ...]
-        prop_z.save_input_hook(model, input)
-        self.assertTrue(torch.all(input.eq(model.saved_input)))
+        inp = t(np.zeros(4)).uniform_()[None, ...]
+        prop_z.save_input_hook(model, inp)
+        self.assertTrue(torch.all(inp.eq(model.saved_input)))
 
     def test_mod_param(self):
         # tests mod_params and corresponding context
@@ -139,7 +139,7 @@ class TestZennitPropagation(unittest.TestCase):
         output = model(inp)
 
         # test if input hook is correctly stored
-        hook_object.forward(model, [inp], output) # TODO why does inp have to be a list? mod_params does not store it as a list
+        hook_object.forward(model, [inp], output) # inp is list to represent hook
         self.assertTrue(torch.all(inp.eq(hook_object.stored_tensors["input"][0])))
 
         model.stored_modparams = {'input': inp} # TODO this should work with context, but does not
@@ -168,7 +168,7 @@ class TestZennitPropagation(unittest.TestCase):
         epsilon_object.register(model)
 
         # test if input hook is correctly stored
-        epsilon_object.forward(model, [inp], output) # TODO why does inp have to be a list? mod_params does not store it as a list
+        epsilon_object.forward(model, [inp], output) # inp is list to represent hook
         self.assertTrue(torch.all(inp.eq(epsilon_object.stored_tensors["input"][0])))
 
         model.stored_modparams = {'input': inp} # TODO this should work with context, but does not
@@ -200,9 +200,9 @@ class TestLXTPropagation(unittest.TestCase):
     def test_save_input_hook(self):
         # tests 'saved_input' attribute of module
         model = tnn.Linear(4, 2)
-        input = t(np.zeros(4)).uniform_()[None, ...]
-        prop_z.save_input_hook(model, input)
-        self.assertTrue(torch.all(input.eq(model.saved_input)))
+        inp = t(np.zeros(4)).uniform_()[None, ...]
+        prop_z.save_input_hook(model, inp)
+        self.assertTrue(torch.all(inp.eq(model.saved_input)))
 
     def test_mod_param(self):
         # tests mod_params and corresponding context
@@ -269,7 +269,7 @@ class TestLXTPropagation(unittest.TestCase):
         output = model(inp)
 
         # test if input hook is correctly stored
-        hook_object.forward(model, [inp], output) # TODO why does inp have to be a list? mod_params does not store it as a list
+        hook_object.forward(model, [inp], output) # inp is list to represent hook
         self.assertTrue(torch.all(inp.eq(hook_object.stored_tensors["input"][0])))
 
         model.stored_modparams = {'input': inp} # TODO this should work with context, but does not
@@ -298,7 +298,7 @@ class TestLXTPropagation(unittest.TestCase):
         epsilon_object.register(model)
 
         # test if input hook is correctly stored
-        epsilon_object.forward(model, [inp], output) # TODO why does inp have to be a list? mod_params does not store it as a list
+        epsilon_object.forward(model, [inp], output) # inp is list to represent hook
         self.assertTrue(torch.all(inp.eq(epsilon_object.stored_tensors["input"][0])))
 
         model.stored_modparams = {'input': inp} # TODO this should work with context, but does not

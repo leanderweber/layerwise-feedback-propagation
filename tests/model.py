@@ -9,16 +9,11 @@ import torchvision.transforms as T
 from lfprop.model import activations
 from lfprop.model import custom_resnet
 from lfprop.model import spiking_networks
+from .helpers import t
 
 step_object = activations.Step()
 sum_object = custom_resnet.Sum()
 #cbb = custom_resnet.CustomBasicBlock()
-
-def t(x) -> torch.Tensor:
-    try:
-        return torch.tensor(x)
-    except:
-        return torch.from_numpy(x)
 
 class TestModel(unittest.TestCase):
 

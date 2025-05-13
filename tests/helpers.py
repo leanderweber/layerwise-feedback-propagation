@@ -3,5 +3,5 @@ import torch
 def t(x) -> torch.Tensor:
     try:
         return torch.tensor(x)
-    except:
+    except ValueError:
         return torch.from_numpy(x)
