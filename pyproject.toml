@@ -34,7 +34,6 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Operating System :: POSIX :: Linux",
 ]
 license = "BSD-3-Clause"
 exclude = [
@@ -50,18 +49,18 @@ exclude = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.9"
-zennit = { version = "^0.5.1", platform = "linux" }
-lxt = { version = "^0.6.1", platform = "linux" }
-wandb = { version = "^0.19.4", optional = true, platform = "linux" }
-notebook = { version = "^7.3.2", optional = true, platform = "linux" }
-joblib = { version = "^1.4.2", optional = true, platform = "linux" }
-pandas = { version = "^2.2.3", optional = true, platform = "linux" }
-scikit-learn = { version = "^1.6.1", optional = true, platform = "linux" }
-matplotlib = { version = "<3.8", optional = true, platform = "linux" }
-torcheval = { version = "^0.0.7", optional = true, platform = "linux" }
-snntorch = { version = "^0.9.1", optional = true, platform = "linux" }
-pytorch-lightning = { version = "^2.5.0.post0", optional = true, platform = "linux" }
+python = ">=3.11"
+zennit = "^0.5.1"
+lxt = "^0.6.1"
+wandb = { version = "^0.19.4", optional = true }
+notebook = { version = "^7.3.2", optional = true }
+joblib = { version = "^1.4.2", optional = true }
+pandas = { version = "^2.2.3", optional = true }
+scikit-learn = { version = "^1.6.1", optional = true }
+matplotlib = { version = "<3.8", optional = true }
+torcheval = { version = "^0.0.7", optional = true }
+snntorch = { version = "^0.9.1", optional = true }
+pytorch-lightning = { version = "^2.5.0.post0", optional = true }
 
 [tool.poetry.extras]
 quickstart = ["notebook", "torcheval", "snntorch"]
@@ -78,8 +77,6 @@ full = [
     "pytorch-lightning",
 ]
 
-[tool.poetry.requires-plugins]
-poetry-plugin-export = ">=1.8"
 
 [project]
 name = "lfprop"
@@ -117,7 +114,6 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Operating System :: POSIX :: Linux",
 ]
 
 [project.urls]
