@@ -6,14 +6,17 @@ from lfprop.rewards import reward_functions
 
 from .helpers import t
 
+# Code from nbs/investigate-simple-rewards.ipynb
+
 customCELoss_obj = rewards.CustomCrossEntropyLoss()
+sigBCELoss_obj = rewards.SigmoidBCELossWrapper()
 
 class TestRewards(unittest.TestCase):
     
     def test_customcrossentropyloss(self):
-        # test tensor_backward_hook and forward
+        # test tensor_backward_hook TODO
 
-        #TODO check if test for forward is at all useful
+        # test forward
         # inp needs to have at least two dimensions
         inp = t([[3., 3., 3.], [3., 2., 3.]])
         target = t([2, 1])
@@ -46,4 +49,19 @@ class TestRewards(unittest.TestCase):
     def test_get_reward(self):
         # test get_reward
         return
+    
+class TestRewardFunctions(unittest.TestCase):
+    
+    def test_maximizesingleneuron(self):
+
+        return
+    
+    def test_minimizesingleneuron(self):
+
+        return
+    
+    def test_maximizesingleneuron(self):
+
+        return
+    
     

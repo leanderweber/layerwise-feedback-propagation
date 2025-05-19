@@ -38,5 +38,8 @@ minimal-example-data/
 # pyCharm project files
 .idea
 
+# pip file (generated during test worflow)
+requirements.txt
+
 #Cached Stuff
 *__pycache__/
