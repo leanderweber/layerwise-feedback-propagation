@@ -6,8 +6,6 @@ from lfprop.rewards import reward_functions
 
 from .helpers import t
 
-# Code from nbs/investigate-simple-rewards.ipynb
-
 customCELoss_obj = rewards.CustomCrossEntropyLoss()
 sigBCELoss_obj = rewards.SigmoidBCELossWrapper()
 
