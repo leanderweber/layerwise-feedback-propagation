@@ -186,16 +186,6 @@ class TestZennitPropagation(unittest.TestCase):
         return
 
 class TestLXTPropagation(unittest.TestCase):
-
-    # test functions
-    def test_collect_leaves(self):
-        # tests if childless module is selected as own leaf
-        childless = tnn.Linear(4, 2)
-        leaves = prop_z.collect_leaves(childless)
-        self.assertIn(childless, [x for x in leaves])
-
-        # TODO write more test cases with actual leaves
-        # layers are children and are built recursively
     
     def test_save_input_hook(self):
         # tests 'saved_input' attribute of module

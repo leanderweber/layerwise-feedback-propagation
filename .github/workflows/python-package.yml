@@ -38,5 +38,6 @@ jobs:
         poetry export -f requirements.txt --without-hashes --extras full > requirements.txt
         TMPDIR=/home/user/tmp/ python -m pip install -r requirements.txt
         python -m pip install coverage
+    - name: Test and report coverage
         coverage run -m unittest tests.model tests.propagation tests.rewards tests.integration
-        coverage html --omit '*_remote_module_non_scriptable.py'
+        coverage report --omit '*_remote_module_non_scriptable.py'

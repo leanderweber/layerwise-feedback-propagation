@@ -186,7 +186,8 @@ class Trainer:
                 eval_stats = self.eval(datamodes=["train", "test"])
 
                 print(
-                    "Epoch {}/{}: (Train Criterion) {:.2f}; (Train Accuracy) {:.2f}; (Test Criterion) {:.2f}; (Test Accuracy) {:.2f}".format(
+                    "Epoch {}/{}: (Train Criterion) {:.2f}; (Train Accuracy) {:.2f}; (Test Criterion) {:.2f};"
+                    "(Test Accuracy) {:.2f}".format(
                         epoch + 1,
                         epochs,
                         float(np.mean(eval_stats["train"]["criterion"])),
