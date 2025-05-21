@@ -19,7 +19,10 @@ DATASET_MAPPING = {
     "swirls": custom_datasets.Swirls,
 }
 
-HUGGINGFACE_DATASET_MAPPING = {"beans": "nateraw/beans", "oxford-flowers": "nkirschi/oxford-flowers"}
+HUGGINGFACE_DATASET_MAPPING = {
+    "beans": "nateraw/beans",
+    "oxford-flowers": "nkirschi/oxford-flowers",
+}
 
 
 def collate_fn_vit(batch):
@@ -86,7 +89,7 @@ def get_dataset(dataset_name, root_path, transform, mode, **kwargs):
         dummy_input = None
         class_labels = None
     else:
-        orig_dataset = datasets.load_dataset(HUGGINGFACE_DATASET_MAPPING[dataset_name])
+        orig_dataset = datasets.load_dataset(HUGGINGFACE_DATASET_MAPPING[dataset_name], trust_remote_code=True)
         dataset = orig_dataset.with_transform(transform)[mode]
         dummy_input = {k: torch.randn(v.shape)[None, ...] for k, v in dataset[0].items() if not isinstance(v, int)}
         class_labels = dataset.features["labels"].names
