@@ -59,21 +59,11 @@ def compute(self: TRecall) -> torch.Tensor:
 torcheval.metrics.classification.MulticlassRecall.compute = compute
 
 
-def evaluate(model, loader, criterion_func, device):
+def evaluate(model, loader, num_classes, criterion_func, device):
     """
     Evaluates one epoch (predictions and accuracy). Returns labels, predictions, accuracy and reward function.
     """
-    binary = True
-    for i, (inputs, lab) in enumerate(loader):
-        inp = inputs.to(device)
-        with torch.no_grad():
-            outputs = model(inp)
-        if outputs.shape[-1] == 1:
-            binary = True
-            num_classes = 2
-        else:
-            binary = False
-            num_classes = outputs.shape[-1]
+    binary = True if num_classes == 2 else False
 
     if binary:
         metrics = {
@@ -128,21 +118,19 @@ def evaluate(model, loader, criterion_func, device):
     model.eval()
 
     # Iterate over data.
-    for i, (inputs, labels) in enumerate(loader):
+    for i, batch in enumerate(loader):
         # Prepare inputs and labels
-        inp = inputs.to(device)
-        lab = labels.to(device)
 
         with torch.no_grad():
             # Get model predictions
-            outputs = model(inp)
+            inputs, labels, outputs = model.forward_fn(batch, model, lfp_step=False)
 
         with torch.set_grad_enabled(True):
             # Get rewards
             if isinstance(criterion_func, torch.nn.modules.loss._Loss):
-                crit = torch.ones_like(outputs) * criterion_func(outputs, lab)  # reshape to correct shape
+                crit = torch.ones_like(outputs) * criterion_func(outputs, labels)  # reshape to correct shape
             else:
-                crit = criterion_func(outputs, lab)
+                crit = criterion_func(outputs, labels)
 
         if binary:
             outputs = torch.nn.functional.sigmoid(outputs).squeeze()
@@ -151,7 +139,7 @@ def evaluate(model, loader, criterion_func, device):
             if k == "criterion":
                 metrics[k].update(crit)
             else:
-                metrics[k].update(outputs, lab)
+                metrics[k].update(outputs, labels)
 
     return_dict = {m: metric.compute().detach().cpu().numpy() for m, metric in metrics.items()}
 

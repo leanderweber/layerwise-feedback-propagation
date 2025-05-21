@@ -1,5 +1,7 @@
 import os
 
+import datasets
+import torch
 import torchvision.datasets as tvisiondata
 
 from . import custom_datasets
@@ -17,6 +19,15 @@ DATASET_MAPPING = {
     "swirls": custom_datasets.Swirls,
 }
 
+HUGGINGFACE_DATASET_MAPPING = {"beans": "nateraw/beans", "oxford-flowers": "nkirschi/oxford-flowers"}
+
+
+def collate_fn_vit(batch):
+    return {
+        "pixel_values": torch.stack([x["pixel_values"] for x in batch]),
+        "labels": torch.tensor([x["labels"] for x in batch]),
+    }
+
 
 def get_dataset(dataset_name, root_path, transform, mode, **kwargs):
     """
@@ -32,44 +43,54 @@ def get_dataset(dataset_name, root_path, transform, mode, **kwargs):
         mode = "val"
 
     # Check if dataset_name is valid
-    if dataset_name not in DATASET_MAPPING:
+    if dataset_name not in DATASET_MAPPING and dataset_name not in HUGGINGFACE_DATASET_MAPPING:
         raise ValueError("Dataset '{}' not supported.".format(dataset_name))
 
-    # Adapt root_path
-    if DATASET_MAPPING[dataset_name] not in [
-        custom_datasets.ImageNet,
-        custom_datasets.CUB,
-        custom_datasets.ISIC,
-        custom_datasets.SKLearnCircles,
-        custom_datasets.SKLearnBlobs,
-        custom_datasets.Swirls,
-        custom_datasets.Food11,
-    ]:
-        root = os.path.join(root_path, dataset_name)
-    else:
-        root = root_path
+    if dataset_name in DATASET_MAPPING:
+        # Adapt root_path
+        if DATASET_MAPPING[dataset_name] not in [
+            custom_datasets.ImageNet,
+            custom_datasets.CUB,
+            custom_datasets.ISIC,
+            custom_datasets.SKLearnCircles,
+            custom_datasets.SKLearnBlobs,
+            custom_datasets.Swirls,
+            custom_datasets.Food11,
+        ]:
+            root = os.path.join(root_path, dataset_name)
+        else:
+            root = root_path
 
-    # Load correct dataset
-    if dataset_name not in ["mnist", "cifar10", "cifar100"]:
-        dataset = DATASET_MAPPING[dataset_name](
-            root=root,
-            transform=transform,
-            **{
-                **kwargs,
+        # Load correct dataset
+        if dataset_name not in ["mnist", "cifar10", "cifar100"]:
+            dataset = DATASET_MAPPING[dataset_name](
+                root=root,
+                transform=transform,
                 **{
-                    "download": True,
-                    "train": mode == "train",
-                    "mode": mode,
+                    **kwargs,
+                    **{
+                        "download": True,
+                        "train": mode == "train",
+                        "mode": mode,
+                    },
                 },
-            },
-        )
+            )
+        else:
+            dataset = DATASET_MAPPING[dataset_name](
+                root=root,
+                transform=transform,
+                download=True,
+                train=mode == "train",
+            )
+        collate_fn = None
+        dummy_input = None
+        class_labels = None
     else:
-        dataset = DATASET_MAPPING[dataset_name](
-            root=root,
-            transform=transform,
-            download=True,
-            train=mode == "train",
-        )
+        orig_dataset = datasets.load_dataset(HUGGINGFACE_DATASET_MAPPING[dataset_name])
+        dataset = orig_dataset.with_transform(transform)[mode]
+        dummy_input = {k: torch.randn(v.shape)[None, ...] for k, v in dataset[0].items() if not isinstance(v, int)}
+        class_labels = dataset.features["labels"].names
+        collate_fn = collate_fn_vit
 
     # Return dataset
-    return dataset
+    return dataset, collate_fn, dummy_input, class_labels

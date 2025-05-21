@@ -11,10 +11,12 @@ DATALOADER_MAPPING = {
     "circles": tdata.DataLoader,
     "blobs": tdata.DataLoader,
     "swirls": tdata.DataLoader,
+    "beans": tdata.DataLoader,
+    "oxford-flowers": tdata.DataLoader,
 }
 
 
-def get_dataloader(dataset_name, dataset, batch_size, shuffle):
+def get_dataloader(dataset_name, dataset, batch_size, shuffle, collate_fn=None):
     """
     selects the correct dataloader for the dataset
     """
@@ -25,9 +27,7 @@ def get_dataloader(dataset_name, dataset, batch_size, shuffle):
 
     # Load correct dataloader
     dataloader = DATALOADER_MAPPING[dataset_name](
-        dataset=dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
+        dataset=dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_fn
     )
 
     # Return dataset

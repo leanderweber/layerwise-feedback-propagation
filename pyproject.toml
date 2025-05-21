@@ -1,7 +1,7 @@
 [tool.poetry]
 package-mode = true
 name = "lfprop"
-version = "0.1.0"
+version = "0.1.1"
 description = "A package for gradient-free neural network training using LFP"
 readme = "README.md"
 authors = [
@@ -61,9 +61,12 @@ matplotlib = { version = "<3.8", optional = true }
 torcheval = { version = "^0.0.7", optional = true }
 snntorch = { version = "^0.9.1", optional = true }
 pytorch-lightning = { version = "^2.5.0.post0", optional = true }
+open-clip-torch = { version = "^2.31.0", optional = true }
+datasets = { version = "^3.3.2", optional = true }
+torch-pso = {version = "*", optional = true }
 
 [tool.poetry.extras]
-quickstart = ["notebook", "torcheval", "snntorch"]
+quickstart = ["notebook", "torcheval", "snntorch", "datasets"]
 snn = ["snntorch"]
 full = [
     "wandb",
@@ -75,12 +78,15 @@ full = [
     "torcheval",
     "snntorch",
     "pytorch-lightning",
+    "open-clip-torch",
+    "datasets",
+    "torch-pso"
 ]
 
 
 [project]
 name = "lfprop"
-version = "0.1.0"
+version = "0.1.1"
 description = "A package for gradient-free neural network training using LFP"
 readme = "README.md"
 license = { file = "LICENSE" }

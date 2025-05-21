@@ -35,7 +35,6 @@ TRANSFER_LRS = [
 ]
 PROPAGATOR_NAMES = ["lfp-epsilon", "vanilla-gradient"]
 CLIP_UPDATES = [False]
-NORM_BACKWARDS = [False]
 WEIGHT_DECAYS = [0.0001]
 SCHEDULER_NAMES = ["onecyclelr"]
 SEEDS = [7240, 5110, 5628]
@@ -48,41 +47,39 @@ for transfer_dataset_name in TRANSFER_DATASET_NAMES:
                 for clip_updates in CLIP_UPDATES:
                     for weight_decay in WEIGHT_DECAYS:
                         for scheduler_name in SCHEDULER_NAMES:
-                            for norm_backward in NORM_BACKWARDS:
-                                for seed in SEEDS:
-                                    base_config["transfer_lr"] = transfer_lr
-                                    base_config["propagator_name"] = propagator_name
-                                    base_config["seed"] = seed
+                            for seed in SEEDS:
+                                base_config["transfer_lr"] = transfer_lr
+                                base_config["propagator_name"] = propagator_name
+                                base_config["seed"] = seed
 
-                                    base_config["transfer_data_path"] = f"/mnt/data/{transfer_dataset_name}"
-                                    base_config["transfer_dataset_name"] = transfer_dataset_name
-                                    base_config["model_name"] = model_name
-                                    base_config["wandb_project_name"] = (
-                                        f"imagenet-to-{transfer_dataset_name}-transfer-{model_name}"
+                                base_config["transfer_data_path"] = f"/mnt/data/{transfer_dataset_name}"
+                                base_config["transfer_dataset_name"] = transfer_dataset_name
+                                base_config["model_name"] = model_name
+                                base_config["wandb_project_name"] = (
+                                    f"imagenet-to-{transfer_dataset_name}-transfer-{model_name}"
+                                )
+
+                                base_config["clip_updates"] = clip_updates
+                                base_config["weight_decay"] = weight_decay
+                                base_config["scheduler_name"] = scheduler_name
+
+                                base_config["base_model_path"] = f"/mnt/output/{seed}/ckpts/base-model-last.pt"
+
+                                config_name = f"{base_config['transfer_dataset_name']}_{base_config['model_name']}"
+                                config_name += f"_{base_config['transfer_lr']}_{base_config['propagator_name']}"
+                                config_name += f"_{base_config['norm_backward']}"
+                                config_name += f"_{base_config['weight_decay']}_{base_config['scheduler_name']}"
+                                config_name += f"_{base_config['seed']}"
+
+                                with open(
+                                    f"{config_dir}/cluster/{config_name}_transfermodel.yaml",
+                                    "w",
+                                ) as outfile:
+                                    yaml.dump(
+                                        base_config,
+                                        outfile,
+                                        default_flow_style=False,
                                     )
 
-                                    base_config["clip_updates"] = clip_updates
-                                    base_config["norm_backward"] = norm_backward
-                                    base_config["weight_decay"] = weight_decay
-                                    base_config["scheduler_name"] = scheduler_name
-
-                                    base_config["base_model_path"] = f"/mnt/output/{seed}/ckpts/base-model-last.pt"
-
-                                    config_name = f"{base_config['transfer_dataset_name']}_{base_config['model_name']}"
-                                    config_name += f"_{base_config['transfer_lr']}_{base_config['propagator_name']}"
-                                    config_name += f"_{base_config['norm_backward']}_{base_config['clip_updates']}"
-                                    config_name += f"_{base_config['weight_decay']}_{base_config['scheduler_name']}"
-                                    config_name += f"_{base_config['seed']}"
-
-                                    with open(
-                                        f"{config_dir}/cluster/{config_name}_transfermodel.yaml",
-                                        "w",
-                                    ) as outfile:
-                                        yaml.dump(
-                                            base_config,
-                                            outfile,
-                                            default_flow_style=False,
-                                        )
-
-                                    counter += 1
+                                counter += 1
 print(f"Created {counter} files!")

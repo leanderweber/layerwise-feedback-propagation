@@ -1,5 +1,6 @@
 import torch
 import torchvision
+import transformers
 
 from lfprop.model import activations, custom_resnet
 
@@ -11,6 +12,10 @@ TORCHMODEL_MAP = {
     "resnet34": custom_resnet.custom_resnet34,
     "customresnet18": custom_resnet.custom_resnet18,
     "vgg16bn": torchvision.models.vgg16_bn,
+}
+
+HUGGINGFACE_MODEL_MAP = {
+    "vit": transformers.ViTForImageClassification,
 }
 
 MODEL_MAP = {
@@ -29,6 +34,10 @@ ACTIVATION_MAP = {
     "tanh": torch.nn.Tanh,
     "elu": torch.nn.ELU,
     "step": activations.Step,
+    "negtanh": activations.NegTanh,
+    "negrelu": activations.NegReLU,
+    "neginnerrelu": activations.NegInnerReLU,
+    "negstep": activations.NegStep,
 }
 
 EXCLUDED_MODULE_TYPES = [
@@ -93,7 +102,35 @@ def init_model_weights(model, init_func):
     model.apply(param_init)
 
 
-def get_model(model_name, n_channels, n_outputs, device, **kwargs):
+def forward_fn_default(batch, model, lfp_step=True):
+    """Standard Torchvision Forward Pass"""
+    inputs, labels = batch
+    inputs = inputs.to(model.device)
+    labels = torch.tensor(labels).to(model.device)
+
+    if lfp_step:
+        inputs = inputs.detach().requires_grad_(True)
+
+    outputs = model(inputs)
+
+    return inputs, labels, outputs
+
+
+def forward_fn_vit(batch, model, lfp_step=True):
+    """Forward Function for Huggingface ViT Implementation"""
+
+    labels = batch.get("labels", None).to(model.device)
+    inputs = batch.get("pixel_values", None).to(model.device)
+
+    if lfp_step:
+        inputs = inputs.detach().requires_grad_(True)
+
+    outputs = model(pixel_values=inputs)["logits"]
+
+    return inputs, labels, outputs
+
+
+def get_model(model_name, device, **kwargs):
     """
     Gets the correct model
     """
@@ -101,23 +138,41 @@ def get_model(model_name, n_channels, n_outputs, device, **kwargs):
     replace_last_layer = kwargs.get("replace_last_layer", True)
 
     # Check if model_name is supported
-    if model_name not in MODEL_MAP and model_name not in TORCHMODEL_MAP:
+    if model_name not in MODEL_MAP and model_name not in TORCHMODEL_MAP and model_name not in HUGGINGFACE_MODEL_MAP:
         raise ValueError("Model '{}' is not supported.".format(model_name))
 
     # Build model
     activation = kwargs.get("activation", "relu")
     if model_name in MODEL_MAP:
         model = MODEL_MAP[model_name](
-            n_channels=n_channels,
-            n_outputs=n_outputs,
+            n_channels=kwargs.get("n_channels", 3),
+            n_outputs=kwargs.get("n_outputs", 1000),
             activation=ACTIVATION_MAP[activation],
         )
+        model.forward_fn = forward_fn_default
+        model.is_huggingface = False
+
     elif model_name in TORCHMODEL_MAP:
         model = TORCHMODEL_MAP[model_name](pretrained=kwargs.get("pretrained_model", True))
         if replace_last_layer:
-            replace_torchvision_last_layer(model, n_outputs)
+            replace_torchvision_last_layer(model, kwargs.get("n_outputs", 1000))
         if activation != "relu":
             replace_torchvision_activations(model, ACTIVATION_MAP[activation])
+
+        model.forward_fn = forward_fn_default
+        model.is_huggingface = False
+
+    elif model_name in HUGGINGFACE_MODEL_MAP:
+        class_labels = kwargs.get("class_labels", [])
+        model = HUGGINGFACE_MODEL_MAP[model_name].from_pretrained(
+            kwargs.get("model_checkpoint", None),
+            num_labels=len(class_labels),
+            id2label={str(i): c for i, c in enumerate(class_labels)},
+            label2id={c: str(i) for i, c in enumerate(class_labels)},
+            _attn_implementation="eager",
+        )
+        model.forward_fn = forward_fn_vit
+        model.is_huggingface = True
 
     if "init_func" in kwargs.keys() and kwargs.get("init_func") != "default":
         init_func = INIT_FUNCS[kwargs.get("init_func")]

@@ -2,6 +2,8 @@ import numpy as np
 import torch
 import torchvision.transforms as T
 import torchvision.transforms.functional as F
+import transformers
+from PIL import Image
 
 
 class AddGaussianNoise:
@@ -342,17 +344,36 @@ TRANSFORM_MAP = {
 }
 
 
-def get_transforms(dataset_name, mode):
+def get_vit_transform(model_path):
+    feature_extractor = transformers.ViTImageProcessor.from_pretrained(model_path)
+
+    def vit_transform(batch):
+        # Take a list of PIL images and turn them to pixel values
+        inputs = feature_extractor([Image.open(x) for x in batch["image_file_path"]], return_tensors="pt")
+
+        inputs["labels"] = batch["labels"]
+        return inputs
+
+    return vit_transform
+
+
+HUGGINGFACE_TRANSFORMS = {"beans": get_vit_transform, "oxford-flowers": get_vit_transform}
+
+
+def get_transforms(dataset_name, mode, model_path=None):
     """
     Gets the correct transforms for the dataset
     """
 
     # Check if dataset_name is supported
-    if dataset_name not in TRANSFORM_MAP:
+    if dataset_name not in TRANSFORM_MAP and dataset_name not in HUGGINGFACE_TRANSFORMS:
         raise ValueError("Dataset '{}' not supported.".format(dataset_name))
 
     # Combine transforms
-    transforms = TRANSFORM_MAP[dataset_name][mode]
+    if dataset_name in TRANSFORM_MAP:
+        transforms = TRANSFORM_MAP[dataset_name][mode]
+    else:
+        transforms = HUGGINGFACE_TRANSFORMS[dataset_name](model_path)
 
     # Return transforms
     return transforms

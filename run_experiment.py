@@ -19,13 +19,11 @@ from tqdm import tqdm
 from experiment_utils.data import dataloaders, datasets, transforms
 from experiment_utils.evaluation import evaluate
 from experiment_utils.model import models
-from experiment_utils.utils.utils import register_backward_normhooks, set_random_seeds
+from experiment_utils.utils.utils import set_random_seeds
 from lfprop.propagation import propagator_lxt as propagator
 from lfprop.rewards import rewards
 
 # os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
-
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -86,7 +84,6 @@ class Trainer:
         batch_size,
         scheduler=None,
         lfp_composite=None,
-        norm_backward=False,
         schedule_lr_every_step=False,
         clip_updates=False,
         clip_update_threshold=2.0,
@@ -98,7 +95,6 @@ class Trainer:
         self.device = device
         self.batch_size = batch_size
         self.lfp_composite = lfp_composite
-        self.norm_backward = norm_backward
         self.schedule_lr_every_step = schedule_lr_every_step
         self.clip_updates = clip_updates
         self.clip_update_threshold = clip_update_threshold
@@ -187,12 +183,6 @@ class Trainer:
                     self.last_param_updates[name] = param.grad.data.detach().view(-1)
 
     def grad_step(self, inputs, labels, param_update_log=False):
-        # Backward norm
-        if self.norm_backward:
-            norm_handles = register_backward_normhooks(self.model)
-        else:
-            norm_handles = []
-
         self.model.train()
         with torch.enable_grad():
             self.optimizer.zero_grad()
@@ -207,9 +197,6 @@ class Trainer:
             self.optimizer.step()
 
         self.model.eval()
-
-        for handle in norm_handles:
-            handle.remove()
 
         self.global_step += 1
 
@@ -592,7 +579,6 @@ def run_training_transfer(
     reward_name="correct-class",
     reward_kwargs={},
     loss_name="ce-loss",
-    norm_backward=True,
     transfer_epochs=5,
     model_name="cifar-vgglike",
     activation="relu",
@@ -648,7 +634,6 @@ def run_training_transfer(
         "clip_update_threshold": clip_update_threshold,
         "reward_name": reward_name,
         "loss_name": loss_name,
-        "norm_backward": norm_backward,
         "transfer_epochs": transfer_epochs,
         "model_name": model_name,
         "activation": activation,
@@ -697,9 +682,7 @@ def run_training_transfer(
 
     # Propagation Composite
     propagation_composites = {
-        "lfp-epsilon": propagator.LFPEpsilonComposite(
-            norm_backward=norm_backward,
-        ),
+        "lfp-epsilon": propagator.LFPEpsilonComposite(),
         "vanilla-gradient": None,
     }
     propagation_composite = propagation_composites[propagator_name]
@@ -778,7 +761,6 @@ def run_training_transfer(
         device=device,
         batch_size=batch_size,
         lfp_composite=propagation_composite,
-        norm_backward=norm_backward,
         schedule_lr_every_step=schedule_lr_every_step,
         clip_updates=clip_updates,
         clip_update_threshold=clip_update_threshold,
@@ -854,7 +836,6 @@ def run_training_base(
     reward_name="correct-class",
     reward_kwargs={},
     loss_name="ce-loss",
-    norm_backward=True,
     base_epochs=5,
     model_name="cifar-vgglike",
     activation="relu",
@@ -907,7 +888,6 @@ def run_training_base(
         "clip_update_threshold": clip_update_threshold,
         "reward_name": reward_name,
         "loss_name": loss_name,
-        "norm_backward": norm_backward,
         "base_epochs": base_epochs,
         "model_name": model_name,
         "activation": activation,
@@ -949,15 +929,8 @@ def run_training_base(
 
     # Propagation Composite
     propagation_composites = {
-        "lfp-epsilon": propagator.LFPEpsilonComposite(
-            norm_backward=norm_backward,
-        ),
+        "lfp-epsilon": propagator.LFPEpsilonComposite(),
         "vanilla-gradient": None,
-        # "lfp-zplus-zminus": propagator.LFPZplusZminusConComposite(
-        #     norm_backward=norm_backward,
-        #     use_input_magnitude=True,
-        #     use_param_sign=False
-        # ),
     }
     propagation_composite = propagation_composites[propagator_name]
 
@@ -1023,7 +996,6 @@ def run_training_base(
         device=device,
         batch_size=batch_size,
         lfp_composite=propagation_composite,
-        norm_backward=norm_backward,
         schedule_lr_every_step=schedule_lr_every_step,
         clip_updates=clip_updates,
         clip_update_threshold=clip_update_threshold,
@@ -1114,7 +1086,6 @@ if __name__ == "__main__":
             reward_name=config.reward_name,
             reward_kwargs=config.reward_kwargs,
             loss_name=config.loss_name,
-            norm_backward=config.norm_backward,
             transfer_epochs=config.transfer_epochs,
             model_name=config.model_name,
             activation=config.activation,
@@ -1144,7 +1115,6 @@ if __name__ == "__main__":
             reward_name=config.reward_name,
             reward_kwargs=config.reward_kwargs,
             loss_name=config.loss_name,
-            norm_backward=config.norm_backward,
             base_epochs=config.base_epochs,
             model_name=config.model_name,
             activation=config.activation,

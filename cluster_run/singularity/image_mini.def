@@ -1,10 +1,14 @@
 Bootstrap: docker
-From: pytorch/pytorch:2.3.0-cuda11.8-cudnn8-runtime
+From: pytorch/pytorch:2.6.0-cuda11.8-cudnn9-runtime
 
 %files
-    ./requirements_apptainer.txt /opt/requirements.txt
+    ../../requirements.txt /opt/requirements.txt
+
+%environment
+  export HF_DATASETS_CACHE="/cache_dir"
 
 %post
+    mkdir /cache_dir
     export "PATH=/opt/conda/bin:$PATH"
 
     apt-get update -y
@@ -14,4 +18,4 @@ From: pytorch/pytorch:2.3.0-cuda11.8-cudnn8-runtime
     apt-get install -y wget
     apt-get install -y unzip
     cd /opt
-    pip install -r requirements_apptainer.txt
+    pip install -r requirements.txt
