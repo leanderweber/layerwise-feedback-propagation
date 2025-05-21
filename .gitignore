@@ -1,6 +1,10 @@
 # Wandb
 /wandb/
 
+# Cluster Stuff
+cluster_run/
+configs/vit-training/
+
 # jupyter notebook checkpoints
 .ipynb_checkpoints
 
