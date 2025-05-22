@@ -513,19 +513,19 @@ def run_training_base(
 
     # Data
     print("Loading Initial State...")
-    with nostdout(verbose=verbose):
-        train_dataset, collate_fn, dummy_input, class_labels = datasets.get_dataset(
-            dataset_name,
-            data_path,
-            transforms.get_transforms(dataset_name, "train", model_path=default_model_checkpoint),
-            mode="train",
-        )
-        test_dataset, _, _, _ = datasets.get_dataset(
-            dataset_name,
-            data_path,
-            transforms.get_transforms(dataset_name, "test", model_path=default_model_checkpoint),
-            mode="test",
-        )
+    # with nostdout(verbose=verbose):
+    train_dataset, collate_fn, dummy_input, class_labels = datasets.get_dataset(
+        dataset_name,
+        data_path,
+        transforms.get_transforms(dataset_name, "train", model_path=default_model_checkpoint),
+        mode="train",
+    )
+    test_dataset, _, _, _ = datasets.get_dataset(
+        dataset_name,
+        data_path,
+        transforms.get_transforms(dataset_name, "test", model_path=default_model_checkpoint),
+        mode="test",
+    )
 
     train_loader = dataloaders.get_dataloader(
         dataset_name, train_dataset, batch_size, shuffle=True, collate_fn=collate_fn
