@@ -89,7 +89,12 @@ def get_dataset(dataset_name, root_path, transform, mode, **kwargs):
         dummy_input = None
         class_labels = None
     else:
-        orig_dataset = datasets.load_dataset(HUGGINGFACE_DATASET_MAPPING[dataset_name], trust_remote_code=True)
+        root = os.path.join(root_path, dataset_name)
+        if not os.path.exists(root):
+            orig_dataset = datasets.load_dataset(HUGGINGFACE_DATASET_MAPPING[dataset_name], trust_remote_code=True)
+            orig_dataset.save_to_disk(root)
+        else:
+            orig_dataset = datasets.load_from_disk(root)
         dataset = orig_dataset.with_transform(transform)[mode]
         dummy_input = {k: torch.randn(v.shape)[None, ...] for k, v in dataset[0].items() if not isinstance(v, int)}
         class_labels = (
