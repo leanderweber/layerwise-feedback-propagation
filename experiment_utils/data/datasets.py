@@ -90,8 +90,14 @@ def get_dataset(dataset_name, root_path, transform, mode, **kwargs):
         class_labels = None
     else:
         root = root_path
+        cache_dir = os.path.join(root, "cache")
         if not os.path.exists(root):
-            orig_dataset = datasets.load_dataset(HUGGINGFACE_DATASET_MAPPING[dataset_name], trust_remote_code=True)
+            print("DOWNLOAD HUGGINGFACE DATASET")
+            orig_dataset = datasets.load_dataset(
+                HUGGINGFACE_DATASET_MAPPING[dataset_name],
+                trust_remote_code=True,
+                cache_dir=cache_dir,
+            )
             orig_dataset.save_to_disk(root)
         else:
             orig_dataset = datasets.load_from_disk(root)
