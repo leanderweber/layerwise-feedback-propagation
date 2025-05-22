@@ -344,20 +344,36 @@ TRANSFORM_MAP = {
 }
 
 
-def get_vit_transform(model_path):
+def get_vit_transform_beans(model_path):
     feature_extractor = transformers.ViTImageProcessor.from_pretrained(model_path)
 
-    def vit_transform(batch):
+    def vit_transform_beans(batch):
         # Take a list of PIL images and turn them to pixel values
         inputs = feature_extractor([Image.open(x) for x in batch["image_file_path"]], return_tensors="pt")
 
         inputs["labels"] = batch["labels"]
         return inputs
 
-    return vit_transform
+    return vit_transform_beans
 
 
-HUGGINGFACE_TRANSFORMS = {"beans": get_vit_transform, "oxford-flowers": get_vit_transform}
+def get_vit_transform_oxfordflowers(model_path):
+    feature_extractor = transformers.ViTImageProcessor.from_pretrained(model_path)
+
+    def vit_transform_oxfordflowers(batch):
+        # Take a list of PIL images and turn them to pixel values
+        inputs = feature_extractor([x for x in batch["image"]], return_tensors="pt")
+
+        inputs["labels"] = batch["label"]
+        return inputs
+
+    return vit_transform_oxfordflowers
+
+
+HUGGINGFACE_TRANSFORMS = {
+    "beans": get_vit_transform_beans,
+    "oxford-flowers": get_vit_transform_oxfordflowers,
+}
 
 
 def get_transforms(dataset_name, mode, model_path=None):
