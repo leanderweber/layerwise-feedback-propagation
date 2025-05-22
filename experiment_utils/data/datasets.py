@@ -20,7 +20,7 @@ DATASET_MAPPING = {
 }
 
 HUGGINGFACE_DATASET_MAPPING = {
-    "beans": "nateraw/beans",
+    "beans": "AI-Lab-Makerere/beans",
     "oxford-flowers": "nkirschi/oxford-flowers",
 }
 
@@ -100,6 +100,7 @@ def get_dataset(dataset_name, root_path, transform, mode, **kwargs):
             )
             orig_dataset.save_to_disk(root)
         else:
+            print("USING EXISTING HUGGINGFACE DATASET")
             orig_dataset = datasets.load_from_disk(root)
         dataset = orig_dataset.with_transform(transform)[mode]
         dummy_input = {k: torch.randn(v.shape)[None, ...] for k, v in dataset[0].items() if not isinstance(v, int)}

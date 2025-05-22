@@ -3,7 +3,6 @@ import torch
 import torchvision.transforms as T
 import torchvision.transforms.functional as F
 import transformers
-from PIL import Image
 
 
 class AddGaussianNoise:
@@ -349,7 +348,7 @@ def get_vit_transform_beans(model_path):
 
     def vit_transform_beans(batch):
         # Take a list of PIL images and turn them to pixel values
-        inputs = feature_extractor([Image.open(x) for x in batch["image_file_path"]], return_tensors="pt")
+        inputs = feature_extractor([x for x in batch["image"]], return_tensors="pt")
 
         inputs["labels"] = batch["labels"]
         return inputs
