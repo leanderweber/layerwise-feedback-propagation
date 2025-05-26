@@ -92,7 +92,6 @@ class Trainer:
         clip_updates=False,
         clip_update_threshold=2.0,
         dummy_input=None,
-        snn_n_steps=15,
     ):
         self.model_name = model_name
         self.model = model
@@ -115,7 +114,6 @@ class Trainer:
         self.best_acc = 0
         self.sparsity_func = gini_idx
         self.dummy_input = dummy_input
-        self.snn_n_steps = snn_n_steps
 
     def grad_step(self, batch):
         self.model.train()
@@ -123,9 +121,7 @@ class Trainer:
             self.optimizer.zero_grad()
 
             start1 = time.time()
-            inputs, labels, outputs = self.model.forward_fn(
-                batch, self.model, self.device, lfp_step=False, n_steps=self.snn_n_steps
-            )
+            inputs, labels, outputs = self.model.forward_fn(batch, self.model, lfp_step=False)
             loss = self.criterion(outputs, labels)
             loss.backward()
             end1 = time.time()
@@ -154,13 +150,7 @@ class Trainer:
                     print(modified)
 
                 start1 = time.time()
-                inputs, labels, outputs = self.model.forward_fn(
-                    batch,
-                    modified,
-                    self.device,
-                    lfp_step=True,
-                    n_steps=self.snn_n_steps,
-                )
+                inputs, labels, outputs = self.model.forward_fn(batch, modified, lfp_step=True)
 
                 # Calculate reward
                 # Do like this to avoid tensors being kept in memory
@@ -354,14 +344,7 @@ class Trainer:
     def eval(self, loader):
         print("Evaluating...")
 
-        return_dict = evaluate.evaluate(
-            self.model,
-            loader,
-            len(self.class_labels),
-            self.criterion,
-            device,
-            n_steps=self.snn_n_steps,
-        )
+        return_dict = evaluate.evaluate(self.model, loader, len(self.class_labels), self.criterion, device)
 
         return return_dict
 
@@ -441,6 +424,7 @@ def run_training_base(
     batch_size=128,
     pretrained_model=True,
     n_channels=3,
+    n_outputs=10,
     momentum=0.9,
     weight_decay=0.0,
     scheduler_name="none",
@@ -450,13 +434,8 @@ def run_training_base(
     reward_kwargs={},
     loss_name="ce-loss",
     epochs=5,
-    snn_n_steps=15,
     model_name="cifar-vgglike",
     default_model_checkpoint="google/vit-base-patch16-224-in21k",
-    snn_beta=0.9,
-    snn_reset_mechanism="subtract",
-    snn_surrogate_disable=False,
-    snn_spike_grad="step",
     optimizer_name="sgd",
     activation="relu",
     batch_log=False,
@@ -508,13 +487,8 @@ def run_training_base(
         "reward_name": reward_name,
         "loss_name": loss_name,
         "epochs": epochs,
-        "snn_n_steps": snn_n_steps,
         "model_name": model_name,
         "default_model_checkpoint": default_model_checkpoint,
-        "snn_beta": snn_beta,
-        "snn_reset_mechanism": snn_reset_mechanism,
-        "snn_surrogate_disable": snn_surrogate_disable,
-        "snn_spike_grad": snn_spike_grad,
         "optimizer_name": optimizer_name,
         "activation": activation,
         "batch_log": batch_log,
@@ -573,16 +547,12 @@ def run_training_base(
         model_name,
         device,
         n_channels=n_channels,
-        n_outputs=len(class_labels),
+        n_outputs=n_outputs,
         replace_last_layer=True,
         activation=activation,
         pretrained_model=pretrained_model,
         model_checkpoint=default_model_checkpoint,
         class_labels=class_labels,
-        beta=snn_beta,
-        reset_mechanism=snn_reset_mechanism,
-        surrogate_disable=snn_surrogate_disable,
-        spike_grad=snn_spike_grad,
     )
 
     # Note: We aim to finetune the model here, so we set the embedding parameters to not require grad.
@@ -639,7 +609,6 @@ def run_training_base(
         clip_updates=clip_updates,
         clip_update_threshold=clip_update_threshold,
         dummy_input=dummy_input,
-        snn_n_steps=snn_n_steps,
     )
 
     print("Training...")
@@ -681,104 +650,6 @@ def get_args():
     return args
 
 
-# def plot_wandb_runs(
-#     project,
-#     entity=None,
-#     filters=None,
-#     save_dir="wandb_runs",
-#     metric="accuracy_p050",
-#     color_map=None,
-#     propagator_labels=None,
-#     linewidth=2.5,
-#     alpha_fill=0.18,
-#     fontsize=16,
-# ):
-#     """
-#     Downloads runs from wandb with a given parameter set,
-# saves them locally, and plots the specified metric over epochs.
-#     Args:
-#         project (str): The wandb project name.
-#         entity (str, optional): The wandb entity (user or team).
-#         filters (dict, optional): Filters for selecting runs.
-#         save_dir (str): Directory to save downloaded run histories.
-#         metric (str): Metric to plot (default: "accuracy_p050").
-#         color_map (dict, optional): Mapping from propagator_name to color.
-#         propagator_labels (dict, optional): Mapping from propagator_name to label for legend.
-#         linewidth (float): Line width for plot.
-#         alpha_fill (float): Alpha for fill_between.
-#         fontsize (int): Font size for labels and title.
-#     """
-#     import matplotlib.pyplot as plt
-#     api = wandb.Api()
-#     runs = api.runs(f"{entity}/{project}" if entity else project, filters=filters)
-#     os.makedirs(save_dir, exist_ok=True)
-
-#     # Default color map and labels if not provided
-#     if color_map is None:
-#         color_map = {
-#             "lfp-epsilon": "#1f77b4",
-#             "vanilla-gradient": "#ff7f0e",
-#             "lfp": "#2ca02c",
-#             "lfp-eps": "#1f77b4",
-#             "bp": "#ff7f0e",
-#         }
-#     if propagator_labels is None:
-#         propagator_labels = {
-#             "lfp-epsilon": "LFP-$\epsilon$",
-#             "vanilla-gradient": "BP",
-#             "lfp": "LFP",
-#             "lfp-eps": "LFP-$\epsilon$",
-#             "bp": "BP",
-#         }
-
-#     # Aggregate histories by propagator_name
-#     histories = {}
-#     for run in runs:
-#         propagator = run.config.get("propagator_name", "unknown")
-#         print(f"Downloading run: {run.name} ({run.id}), propagator: {propagator}")
-#         history = run.history(samples=100000, pandas=True)
-#         csv_path = os.path.join(save_dir, f"{run.id}_history.csv")
-#         history.to_csv(csv_path, index=False)
-#         if metric in history.columns and "epoch" in history.columns:
-#             if propagator not in histories:
-#                 histories[propagator] = []
-#             histories[propagator].append(history[["epoch", metric]].dropna())
-#         else:
-#             print(f"Metric '{metric}' or 'epoch' not found in run {run.id}")
-
-#     plt.figure(figsize=(8, 5))
-#     for propagator, runs_histories in histories.items():
-#         # Align by epoch, compute mean and std
-#         df_all = pd.concat(runs_histories)
-#         grouped = df_all.groupby("epoch")[metric]
-#         mean = grouped.mean()
-#         std = grouped.std()
-#         color = color_map.get(propagator, None)
-#         label = propagator_labels.get(propagator, propagator)
-#         plt.plot(
-#             mean.index,
-#             mean.values,
-#             label=label,
-#             color=color,
-#             linewidth=linewidth,
-#         )
-#         plt.fill_between(
-#             mean.index,
-#             mean - std,
-#             mean + std,
-#             color=color,
-#             alpha=alpha_fill,
-#             linewidth=0,
-#         )
-
-#     plt.xlabel("Epoch", fontsize=fontsize)
-#     plt.ylabel(metric.replace("_", " ").title(), fontsize=fontsize)
-#     plt.title(f"{metric.replace('_', ' ').title()} over Epochs", fontsize=fontsize)
-#     plt.legend(fontsize=fontsize - 2)
-#     plt.tight_layout()
-#     plt.grid(True, alpha=0.3)
-#     plt.show()
-
 if __name__ == "__main__":
     print("Starting script...")
 
@@ -802,9 +673,10 @@ if __name__ == "__main__":
         data_path=config.data_path,
         dataset_name=config.dataset_name,
         lr=config.lr,
+        n_channels=config.n_channels,
+        n_outputs=config.n_outputs,
         propagator_name=config.propagator_name,
         batch_size=config.batch_size,
-        n_channels=config.n_channels,
         momentum=config.momentum,
         weight_decay=config.weight_decay,
         scheduler_name=config.scheduler_name,
@@ -814,13 +686,8 @@ if __name__ == "__main__":
         reward_kwargs=config.reward_kwargs,
         loss_name=config.loss_name,
         epochs=config.epochs,
-        snn_n_steps=config.snn_n_steps,
         model_name=config.model_name,
         default_model_checkpoint=config.default_model_checkpoint,
-        snn_beta=config.snn_beta,
-        snn_reset_mechanism=config.snn_reset_mechanism,
-        snn_surrogate_disable=config.snn_surrogate_disable,
-        snn_spike_grad=config.snn_spike_grad,
         optimizer_name=config.optimizer_name,
         activation=config.activation,
         batch_log=config.batch_log,

@@ -1,3 +1,4 @@
+import snntorch.functional as SF
 import torch
 
 from . import reward_functions
@@ -99,6 +100,7 @@ REWARD_MAP = {
     "misclassificationreward": reward_functions.MisclassificationReward,
     "correctclassification": reward_functions.CorrectclassificationReward,
     "boundedsoftmaxreward": reward_functions.BoundedSoftmaxReward,
+    "snnratecodedreward": reward_functions.SnnCorrectClassRewardSpikesRateCoded,
 }
 
 LOSS_MAP = {
@@ -107,6 +109,7 @@ LOSS_MAP = {
     "bce-loss": SigmoidBCELossWrapper,
     "maximizesingleneuronloss": MaximizeSingleNeuron,
     "minimizesingleneuronloss": MinimizeSingleNeuron,
+    "snnratecodedloss": SF.loss.ce_rate_loss,
 }
 
 

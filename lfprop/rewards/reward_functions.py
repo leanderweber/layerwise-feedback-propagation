@@ -219,7 +219,7 @@ class SnnCorrectClassRewardSpikesRateCoded:  # [ ] rename!
         self.device = device
         self.saved_rewards = []
 
-    def __call__(self, *, spikes: torch.Tensor, potentials: torch.Tensor, labels: torch.Tensor):
+    def __call__(self, spikes: torch.Tensor, labels: torch.Tensor):
         """
         Computation
         :param spikes: Shape (n_timesteps, batchsize, output_shape)
@@ -246,7 +246,7 @@ class SnnCorrectClassRewardSpikesRateCoded:  # [ ] rename!
         )
         return reward
 
-    def get_predictions(self, *, spikes: torch.Tensor, potentials: torch.Tensor):
+    def get_predictions(self, spikes: torch.Tensor):
         """
         Computation
         :param spikes: Shape (n_timesteps, batchsize, output_shape)

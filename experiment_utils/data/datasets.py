@@ -85,9 +85,9 @@ def get_dataset(dataset_name, root_path, transform, mode, **kwargs):
                 download=True,
                 train=mode == "train",
             )
+        class_labels = dataset.classes
         collate_fn = None
         dummy_input = None
-        class_labels = None
     else:
         root = root_path
         cache_dir = os.path.join(root, "cache")

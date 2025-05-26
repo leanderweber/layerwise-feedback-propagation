@@ -2,7 +2,7 @@ import torch
 import torchvision
 import transformers
 
-from lfprop.model import activations, custom_resnet
+from lfprop.model import activations, custom_resnet, spiking_networks
 
 from . import model_definitions
 
@@ -16,6 +16,14 @@ TORCHMODEL_MAP = {
 
 HUGGINGFACE_MODEL_MAP = {
     "vit": transformers.ViTForImageClassification,
+}
+
+SPIKING_MODEL_MAP = {
+    "lifmlp": spiking_networks.LifMLP,
+    "smalllifmlp": spiking_networks.SmallLifMLP,
+    "lifcnn": spiking_networks.LifCNN,
+    "lifvgg16": spiking_networks.LifVGG16,
+    "lifresnet18": spiking_networks.LifResNet18,
 }
 
 MODEL_MAP = {
@@ -102,11 +110,11 @@ def init_model_weights(model, init_func):
     model.apply(param_init)
 
 
-def forward_fn_default(batch, model, lfp_step=True):
+def forward_fn_default(batch, model, device, lfp_step=True, **kwargs):
     """Standard Torchvision Forward Pass"""
     inputs, labels = batch
-    inputs = inputs.to(model.device)
-    labels = torch.tensor(labels).to(model.device)
+    inputs = inputs.to(device)
+    labels = torch.tensor(labels).to(device)
 
     if lfp_step:
         inputs = inputs.detach().requires_grad_(True)
@@ -116,11 +124,11 @@ def forward_fn_default(batch, model, lfp_step=True):
     return inputs, labels, outputs
 
 
-def forward_fn_vit(batch, model, lfp_step=True):
+def forward_fn_vit(batch, model, device, lfp_step=True, **kwargs):
     """Forward Function for Huggingface ViT Implementation"""
 
-    labels = batch.get("labels", None).to(model.device)
-    inputs = batch.get("pixel_values", None).to(model.device)
+    labels = batch.get("labels", None).to(device)
+    inputs = batch.get("pixel_values", None).to(device)
 
     if lfp_step:
         inputs = inputs.detach().requires_grad_(True)
@@ -130,15 +138,47 @@ def forward_fn_vit(batch, model, lfp_step=True):
     return inputs, labels, outputs
 
 
+def forward_fn_spiking(batch, model, device, lfp_step=True, n_steps=15, **kwargs):
+    """Forward Function for Spiking Neural Networks"""
+
+    inputs, labels = batch
+    inputs = inputs.to(device)
+    labels = torch.tensor(labels).to(device)
+
+    if lfp_step:
+        inputs = inputs.detach().requires_grad_(True)
+
+    spk_rec = []
+    for step in range(n_steps):
+        outputs = model(inputs)
+        spk_out, _ = outputs
+        spk_rec.append(spk_out)
+    spikes = torch.stack(spk_rec, dim=0)
+
+    return inputs, labels, spikes
+
+
 def get_model(model_name, device, **kwargs):
     """
-    Gets the correct model
+    Gets the correct model and initializes it with the given parameters.
+    Also sets some identifying attributes for the model.
+    Args:
+        model_name (str): Name of the model to be used.
+        device (torch.device): Device to which the model should be moved.
+        **kwargs: Additional keyword arguments for model initialization.
+    Returns:
+        model (torch.nn.Module): The initialized model.
     """
 
     replace_last_layer = kwargs.get("replace_last_layer", True)
 
     # Check if model_name is supported
-    if model_name not in MODEL_MAP and model_name not in TORCHMODEL_MAP and model_name not in HUGGINGFACE_MODEL_MAP:
+    if (
+        model_name not in MODEL_MAP
+        and model_name not in TORCHMODEL_MAP
+        and model_name not in HUGGINGFACE_MODEL_MAP
+        and model_name not in SPIKING_MODEL_MAP
+    ):
         raise ValueError("Model '{}' is not supported.".format(model_name))
 
     # Build model
@@ -173,6 +213,18 @@ def get_model(model_name, device, **kwargs):
         )
         model.forward_fn = forward_fn_vit
         model.is_huggingface = True
+
+    elif model_name in SPIKING_MODEL_MAP:
+        model = SPIKING_MODEL_MAP[model_name](
+            n_channels=kwargs.get("n_channels", 3),
+            n_outputs=kwargs.get("n_outputs", 1000),
+            beta=kwargs.get("beta", 0.9),
+            reset_mechanism=kwargs.get("reset_mechanism", "subtract"),
+            surrogate_disable=kwargs.get("surrogate_disable", False),
+            spike_grad=kwargs.get("spike_grad", activations.Step),
+        )
+        model.forward_fn = forward_fn_spiking
+        model.is_huggingface = False
 
     if "init_func" in kwargs.keys() and kwargs.get("init_func") != "default":
         init_func = INIT_FUNCS[kwargs.get("init_func")]

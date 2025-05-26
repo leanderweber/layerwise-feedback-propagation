@@ -42,7 +42,7 @@ class CustomLeaky(snn.Leaky):
 
     def forward(self, input_, mem=None):
         """
-        Clips mem if desired
+        Clips mem if desSPIKED_MECHANISM_MAPired
         """
         if self.minmem is None:
             return super().forward(input_, mem)

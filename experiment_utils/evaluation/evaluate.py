@@ -6,6 +6,8 @@ import torcheval
 import torcheval.metrics
 import torcheval.metrics.classification
 
+from lfprop.model import spiking_networks
+
 TRecall = TypeVar("TRecall")
 
 
@@ -59,7 +61,7 @@ def compute(self: TRecall) -> torch.Tensor:
 torcheval.metrics.classification.MulticlassRecall.compute = compute
 
 
-def evaluate(model, loader, num_classes, criterion_func, device):
+def evaluate(model, loader, num_classes, criterion_func, device, n_steps=15):
     """
     Evaluates one epoch (predictions and accuracy). Returns labels, predictions, accuracy and reward function.
     """
@@ -123,7 +125,7 @@ def evaluate(model, loader, num_classes, criterion_func, device):
 
         with torch.no_grad():
             # Get model predictions
-            inputs, labels, outputs = model.forward_fn(batch, model, lfp_step=False)
+            inputs, labels, outputs = model.forward_fn(batch, model, device, lfp_step=False, n_steps=n_steps)
 
         with torch.set_grad_enabled(True):
             # Get rewards
@@ -134,6 +136,10 @@ def evaluate(model, loader, num_classes, criterion_func, device):
 
         if binary:
             outputs = torch.nn.functional.sigmoid(outputs).squeeze()
+
+        if isinstance(model, spiking_networks.LifMLP):
+            # Sum spikes over the number of timesteps
+            outputs = outputs.sum(0)
 
         for k, v in metrics.items():
             if k == "criterion":
