@@ -61,7 +61,15 @@ def compute(self: TRecall) -> torch.Tensor:
 torcheval.metrics.classification.MulticlassRecall.compute = compute
 
 
-def evaluate(model, loader, num_classes, criterion_func, device, n_steps=15):
+def evaluate(
+    model,
+    loader,
+    num_classes,
+    criterion_func,
+    device,
+    n_steps=15,
+    is_huggingface_data=False,
+):
     """
     Evaluates one epoch (predictions and accuracy). Returns labels, predictions, accuracy and reward function.
     """
@@ -125,7 +133,14 @@ def evaluate(model, loader, num_classes, criterion_func, device, n_steps=15):
 
         with torch.no_grad():
             # Get model predictions
-            inputs, labels, outputs = model.forward_fn(batch, model, device, lfp_step=False, n_steps=n_steps)
+            inputs, labels, outputs = model.forward_fn(
+                batch,
+                model,
+                device,
+                lfp_step=False,
+                n_steps=n_steps,
+                is_huggingface_data=is_huggingface_data,
+            )
 
         with torch.set_grad_enabled(True):
             # Get rewards

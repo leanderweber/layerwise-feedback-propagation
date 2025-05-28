@@ -138,12 +138,16 @@ def forward_fn_vit(batch, model, device, lfp_step=True, **kwargs):
     return inputs, labels, outputs
 
 
-def forward_fn_spiking(batch, model, device, lfp_step=True, n_steps=15, **kwargs):
+def forward_fn_spiking(batch, model, device, lfp_step=True, n_steps=15, is_huggingface_data=False, **kwargs):
     """Forward Function for Spiking Neural Networks"""
 
-    inputs, labels = batch
-    inputs = inputs.to(device)
-    labels = torch.tensor(labels).to(device)
+    if not is_huggingface_data:
+        inputs, labels = batch
+        inputs = inputs.to(device)
+        labels = torch.tensor(labels).to(device)
+    else:
+        inputs = batch.get("pixel_values", None).to(device)
+        labels = batch.get("labels", None).to(device)
 
     if lfp_step:
         inputs = inputs.detach().requires_grad_(True)
@@ -215,7 +219,6 @@ def get_model(model_name, device, **kwargs):
         model.is_huggingface = True
 
     elif model_name in SPIKING_MODEL_MAP:
-        print(kwargs.get("surrogate_disable", False))
         model = SPIKING_MODEL_MAP[model_name](
             n_channels=kwargs.get("n_channels", 3),
             n_outputs=kwargs.get("n_outputs", 1000),

@@ -82,6 +82,7 @@ class Trainer:
         clip_update_threshold=2.0,
         dummy_input=None,
         snn_n_steps=15,
+        is_huggingface_data=False,
     ):
         self.model_name = model_name
         self.model = model
@@ -105,6 +106,7 @@ class Trainer:
         self.sparsity_func = gini_idx
         self.dummy_input = dummy_input
         self.snn_n_steps = snn_n_steps
+        self.is_huggingface_data = is_huggingface_data
 
     def grad_step(self, batch):
         self.model.train()
@@ -112,7 +114,12 @@ class Trainer:
 
         start1 = time.time()
         inputs, labels, outputs = self.model.forward_fn(
-            batch, self.model, self.device, lfp_step=False, n_steps=self.snn_n_steps
+            batch,
+            self.model,
+            self.device,
+            lfp_step=False,
+            n_steps=self.snn_n_steps,
+            is_huggingface_data=self.is_huggingface_data,
         )
         loss = self.criterion(outputs, labels)
 
@@ -150,6 +157,7 @@ class Trainer:
                 self.device,
                 lfp_step=True,
                 n_steps=self.snn_n_steps,
+                is_huggingface_data=self.is_huggingface_data,
             )
 
             # Calculate reward
@@ -352,6 +360,7 @@ class Trainer:
             self.criterion,
             device,
             n_steps=self.snn_n_steps,
+            is_huggingface_data=self.is_huggingface_data,
         )
 
         return return_dict
@@ -631,6 +640,7 @@ def run_training_base(
         clip_update_threshold=clip_update_threshold,
         dummy_input=dummy_input,
         snn_n_steps=snn_n_steps,
+        is_huggingface_data=dataset_name in datasets.HUGGINGFACE_DATASET_MAPPING.keys(),
     )
 
     print("Training...")
