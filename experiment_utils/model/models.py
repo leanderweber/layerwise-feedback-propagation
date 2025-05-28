@@ -215,13 +215,14 @@ def get_model(model_name, device, **kwargs):
         model.is_huggingface = True
 
     elif model_name in SPIKING_MODEL_MAP:
+        print(kwargs.get("surrogate_disable", False))
         model = SPIKING_MODEL_MAP[model_name](
             n_channels=kwargs.get("n_channels", 3),
             n_outputs=kwargs.get("n_outputs", 1000),
             beta=kwargs.get("beta", 0.9),
             reset_mechanism=kwargs.get("reset_mechanism", "subtract"),
             surrogate_disable=kwargs.get("surrogate_disable", False),
-            spike_grad=kwargs.get("spike_grad", activations.Step),
+            spike_grad=kwargs.get("spike_grad", "step"),
         )
         model.forward_fn = forward_fn_spiking
         model.is_huggingface = False

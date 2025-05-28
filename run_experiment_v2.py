@@ -11,7 +11,6 @@ from types import SimpleNamespace
 import joblib
 import numpy as np
 import torch
-import torchvision
 import wandb
 import yaml
 from tqdm import tqdm
@@ -66,16 +65,6 @@ def nostdout(verbose=True):
         sys.stdout = save_stdout
 
 
-def get_head(model):
-    if isinstance(model, torchvision.models.VGG) or isinstance(model, torchvision.models.efficientnet.EfficientNet):
-        head = [m for m in model.classifier.modules() if not isinstance(m, torch.nn.Sequential)][-1]
-    elif isinstance(model, torchvision.models.ResNet) or isinstance(model, torchvision.models.Inception3):
-        head = model.fc
-    else:
-        head = model.classifier[-1]
-    return head
-
-
 class Trainer:
     def __init__(
         self,
@@ -119,27 +108,28 @@ class Trainer:
 
     def grad_step(self, batch):
         self.model.train()
-        with torch.enable_grad():
-            self.optimizer.zero_grad()
+        self.optimizer.zero_grad()
 
-            start1 = time.time()
-            inputs, labels, outputs = self.model.forward_fn(
-                batch, self.model, self.device, lfp_step=False, n_steps=self.snn_n_steps
-            )
-            loss = self.criterion(outputs, labels)
-            loss.backward()
-            end1 = time.time()
+        start1 = time.time()
+        inputs, labels, outputs = self.model.forward_fn(
+            batch, self.model, self.device, lfp_step=False, n_steps=self.snn_n_steps
+        )
+        loss = self.criterion(outputs, labels)
 
-            if self.clip_updates:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_update_threshold, 2.0)
+        loss.backward()
+        end1 = time.time()
 
-            start2 = time.time()
-            self.optimizer.step()
-            end2 = time.time()
+        if self.clip_updates:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_update_threshold, 2.0)
 
-            clock_time = end2 - start2 + end1 - start1
-            self.clock_times.append(clock_time)
+        start2 = time.time()
+        self.optimizer.step()
+        end2 = time.time()
 
+        clock_time = end2 - start2 + end1 - start1
+        self.clock_times.append(clock_time)
+
+        self.model.reset()
         self.model.eval()
 
         self.global_step += 1
@@ -147,43 +137,44 @@ class Trainer:
     def lfp_step(self, batch):
         self.model.train()
 
-        with torch.enable_grad():
-            self.optimizer.zero_grad()
-            with self.lfp_composite.context(self.model, dummy_inputs=self.dummy_input) as modified:
-                if self.global_step == 0:
-                    print(modified)
+        self.optimizer.zero_grad()
+        with self.lfp_composite.context(self.model, dummy_inputs=self.dummy_input) as modified:
+            # with torch.enable_grad():
+            if self.global_step == 0:
+                print(modified)
 
-                start1 = time.time()
-                inputs, labels, outputs = self.model.forward_fn(
-                    batch,
-                    modified,
-                    self.device,
-                    lfp_step=True,
-                    n_steps=self.snn_n_steps,
-                )
+            start1 = time.time()
+            inputs, labels, outputs = self.model.forward_fn(
+                batch,
+                modified,
+                self.device,
+                lfp_step=True,
+                n_steps=self.snn_n_steps,
+            )
 
-                # Calculate reward
-                # Do like this to avoid tensors being kept in memory
-                reward = torch.from_numpy(self.criterion(outputs, labels).detach().cpu().numpy()).to(device)
+            # Calculate reward
+            # Do like this to avoid tensors being kept in memory
+            reward = torch.from_numpy(self.criterion(outputs, labels).detach().cpu().numpy()).to(device)
 
-                # Write LFP Values into .grad attributes
-                _ = torch.autograd.grad((outputs,), (inputs,), grad_outputs=(reward,), retain_graph=False)[0]
-                end1 = time.time()
+            # Write LFP Values into .grad attributes
+            _ = torch.autograd.grad((outputs,), (inputs,), grad_outputs=(reward,), retain_graph=False)[0]
+            end1 = time.time()
 
-                for name, param in self.model.named_parameters():
-                    if param.requires_grad:
-                        param.grad = -param.feedback
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                param.grad = -param.feedback
 
-                if self.clip_updates:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_update_threshold, 2.0)
+        if self.clip_updates:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_update_threshold, 2.0)
 
-                start2 = time.time()
-                self.optimizer.step()
-                end2 = time.time()
+        start2 = time.time()
+        self.optimizer.step()
+        end2 = time.time()
 
-                clock_time = end2 - start2 + end1 - start1
-                self.clock_times.append(clock_time)
+        clock_time = end2 - start2 + end1 - start1
+        self.clock_times.append(clock_time)
 
+        self.model.reset()
         self.model.eval()
 
         self.global_step += 1
@@ -205,36 +196,36 @@ class Trainer:
         if not fromscratch and savepath:
             self.load(savepath, savename, saveappendage)
 
-        eval_stats_train = self.eval(train_loader)
-        eval_stats_test = self.eval(test_loader)
+        # eval_stats_train = self.eval(train_loader)
+        # eval_stats_test = self.eval(test_loader)
 
-        print(
-            "Train: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
-                float(eval_stats_train["criterion"]),
-                (
-                    float(eval_stats_train["accuracy_p050"])
-                    if "accuracy_p050" in eval_stats_train.keys()
-                    else float(eval_stats_train["micro_accuracy_top1"])
-                ),
-            )
-        )
+        # print(
+        #     "Train: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
+        #         float(eval_stats_train["criterion"]),
+        #         (
+        #             float(eval_stats_train["accuracy_p050"])
+        #             if "accuracy_p050" in eval_stats_train.keys()
+        #             else float(eval_stats_train["micro_accuracy_top1"])
+        #         ),
+        #     )
+        # )
 
-        print(
-            "Test: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
-                float(np.mean(eval_stats_test["criterion"])),
-                (
-                    float(eval_stats_test["accuracy_p050"])
-                    if "accuracy_p050" in eval_stats_test.keys()
-                    else float(eval_stats_test["micro_accuracy_top1"])
-                ),
-            )
-        )
+        # print(
+        #     "Test: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
+        #         float(np.mean(eval_stats_test["criterion"])),
+        #         (
+        #             float(eval_stats_test["accuracy_p050"])
+        #             if "accuracy_p050" in eval_stats_test.keys()
+        #             else float(eval_stats_test["micro_accuracy_top1"])
+        #         ),
+        #     )
+        # )
 
-        logdict = {"epoch": 0}
-        logdict.update({"train_" + k: v for k, v in eval_stats_train.items()})
-        logdict.update({"test_" + k: v for k, v in eval_stats_test.items()})
-        logdict.update({"total_training_time": np.sum(self.clock_times)})
-        wandb.log(logdict)
+        # logdict = {"epoch": 0}
+        # logdict.update({"train_" + k: v for k, v in eval_stats_train.items()})
+        # logdict.update({"test_" + k: v for k, v in eval_stats_test.items()})
+        # logdict.update({"total_training_time": np.sum(self.clock_times)})
+        # wandb.log(logdict)
 
         # Store Initial State
         if savepath and epochs > 0:
