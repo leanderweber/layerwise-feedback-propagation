@@ -196,36 +196,36 @@ class Trainer:
         if not fromscratch and savepath:
             self.load(savepath, savename, saveappendage)
 
-        # eval_stats_train = self.eval(train_loader)
-        # eval_stats_test = self.eval(test_loader)
+        eval_stats_train = self.eval(train_loader)
+        eval_stats_test = self.eval(test_loader)
 
-        # print(
-        #     "Train: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
-        #         float(eval_stats_train["criterion"]),
-        #         (
-        #             float(eval_stats_train["accuracy_p050"])
-        #             if "accuracy_p050" in eval_stats_train.keys()
-        #             else float(eval_stats_train["micro_accuracy_top1"])
-        #         ),
-        #     )
-        # )
+        print(
+            "Train: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
+                float(eval_stats_train["criterion"]),
+                (
+                    float(eval_stats_train["accuracy_p050"])
+                    if "accuracy_p050" in eval_stats_train.keys()
+                    else float(eval_stats_train["micro_accuracy_top1"])
+                ),
+            )
+        )
 
-        # print(
-        #     "Test: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
-        #         float(np.mean(eval_stats_test["criterion"])),
-        #         (
-        #             float(eval_stats_test["accuracy_p050"])
-        #             if "accuracy_p050" in eval_stats_test.keys()
-        #             else float(eval_stats_test["micro_accuracy_top1"])
-        #         ),
-        #     )
-        # )
+        print(
+            "Test: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
+                float(np.mean(eval_stats_test["criterion"])),
+                (
+                    float(eval_stats_test["accuracy_p050"])
+                    if "accuracy_p050" in eval_stats_test.keys()
+                    else float(eval_stats_test["micro_accuracy_top1"])
+                ),
+            )
+        )
 
-        # logdict = {"epoch": 0}
-        # logdict.update({"train_" + k: v for k, v in eval_stats_train.items()})
-        # logdict.update({"test_" + k: v for k, v in eval_stats_test.items()})
-        # logdict.update({"total_training_time": np.sum(self.clock_times)})
-        # wandb.log(logdict)
+        logdict = {"epoch": 0}
+        logdict.update({"train_" + k: v for k, v in eval_stats_train.items()})
+        logdict.update({"test_" + k: v for k, v in eval_stats_test.items()})
+        logdict.update({"total_training_time": np.sum(self.clock_times)})
+        wandb.log(logdict)
 
         # Store Initial State
         if savepath and epochs > 0:
