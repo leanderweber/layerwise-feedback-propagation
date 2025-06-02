@@ -22,8 +22,8 @@ SPIKING_MODEL_MAP = {
     "lifmlp": spiking_networks.LifMLP,
     "smalllifmlp": spiking_networks.SmallLifMLP,
     "lifcnn": spiking_networks.LifCNN,
-    "lifvgg16": spiking_networks.LifVGG16,
-    "lifresnet18": spiking_networks.LifResNet18,
+    "deepersnn": spiking_networks.DeeperSNN,
+    "lifresnetlike": spiking_networks.ResNet,
 }
 
 MODEL_MAP = {
@@ -226,6 +226,8 @@ def get_model(model_name, device, **kwargs):
             reset_mechanism=kwargs.get("reset_mechanism", "subtract"),
             surrogate_disable=kwargs.get("surrogate_disable", False),
             spike_grad=kwargs.get("spike_grad", "step"),
+            apply_noise=kwargs.get("apply_noise", False),
+            noise_size=kwargs.get("noise_size", 1e-6),
         )
         model.forward_fn = forward_fn_spiking
         model.is_huggingface = False

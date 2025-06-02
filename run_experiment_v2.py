@@ -204,36 +204,36 @@ class Trainer:
         if not fromscratch and savepath:
             self.load(savepath, savename, saveappendage)
 
-        eval_stats_train = self.eval(train_loader)
-        eval_stats_test = self.eval(test_loader)
+        # eval_stats_train = self.eval(train_loader)
+        # eval_stats_test = self.eval(test_loader)
 
-        print(
-            "Train: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
-                float(eval_stats_train["criterion"]),
-                (
-                    float(eval_stats_train["accuracy_p050"])
-                    if "accuracy_p050" in eval_stats_train.keys()
-                    else float(eval_stats_train["micro_accuracy_top1"])
-                ),
-            )
-        )
+        # print(
+        #     "Train: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
+        #         float(eval_stats_train["criterion"]),
+        #         (
+        #             float(eval_stats_train["accuracy_p050"])
+        #             if "accuracy_p050" in eval_stats_train.keys()
+        #             else float(eval_stats_train["micro_accuracy_top1"])
+        #         ),
+        #     )
+        # )
 
-        print(
-            "Test: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
-                float(np.mean(eval_stats_test["criterion"])),
-                (
-                    float(eval_stats_test["accuracy_p050"])
-                    if "accuracy_p050" in eval_stats_test.keys()
-                    else float(eval_stats_test["micro_accuracy_top1"])
-                ),
-            )
-        )
+        # print(
+        #     "Test: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
+        #         float(np.mean(eval_stats_test["criterion"])),
+        #         (
+        #             float(eval_stats_test["accuracy_p050"])
+        #             if "accuracy_p050" in eval_stats_test.keys()
+        #             else float(eval_stats_test["micro_accuracy_top1"])
+        #         ),
+        #     )
+        # )
 
-        logdict = {"epoch": 0}
-        logdict.update({"train_" + k: v for k, v in eval_stats_train.items()})
-        logdict.update({"test_" + k: v for k, v in eval_stats_test.items()})
-        logdict.update({"total_training_time": np.sum(self.clock_times)})
-        wandb.log(logdict)
+        # logdict = {"epoch": 0}
+        # logdict.update({"train_" + k: v for k, v in eval_stats_train.items()})
+        # logdict.update({"test_" + k: v for k, v in eval_stats_test.items()})
+        # logdict.update({"total_training_time": np.sum(self.clock_times)})
+        # wandb.log(logdict)
 
         # Store Initial State
         if savepath and epochs > 0:
@@ -457,6 +457,8 @@ def run_training_base(
     snn_reset_mechanism="subtract",
     snn_surrogate_disable=False,
     snn_spike_grad="step",
+    snn_apply_noise=False,
+    snn_noise_size=1e-6,
     optimizer_name="sgd",
     activation="relu",
     batch_log=False,
@@ -545,12 +547,14 @@ def run_training_base(
         data_path,
         transforms.get_transforms(dataset_name, "train", model_path=default_model_checkpoint),
         mode="train",
+        return_dummy_input=model_name == "vit",
     )
     test_dataset, _, _, _ = datasets.get_dataset(
         dataset_name,
         data_path,
         transforms.get_transforms(dataset_name, "test", model_path=default_model_checkpoint),
         mode="test",
+        return_dummy_input=model_name == "vit",
     )
 
     train_loader = dataloaders.get_dataloader(
@@ -583,6 +587,8 @@ def run_training_base(
         reset_mechanism=snn_reset_mechanism,
         surrogate_disable=snn_surrogate_disable,
         spike_grad=snn_spike_grad,
+        apply_noise=snn_apply_noise,
+        noise_size=snn_noise_size,
     )
 
     # Note: We aim to finetune the model here, so we set the embedding parameters to not require grad.
@@ -822,6 +828,8 @@ if __name__ == "__main__":
         snn_reset_mechanism=config.snn_reset_mechanism,
         snn_surrogate_disable=config.snn_surrogate_disable,
         snn_spike_grad=config.snn_spike_grad,
+        snn_apply_noise=config.snn_apply_noise,
+        snn_noise_size=config.snn_noise_size,
         optimizer_name=config.optimizer_name,
         activation=config.activation,
         batch_log=config.batch_log,

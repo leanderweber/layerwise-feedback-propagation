@@ -103,7 +103,11 @@ def get_dataset(dataset_name, root_path, transform, mode, **kwargs):
             print("USING EXISTING HUGGINGFACE DATASET")
             orig_dataset = datasets.load_from_disk(root)
         dataset = orig_dataset.with_transform(transform)[mode]
-        dummy_input = {k: torch.randn(v.shape)[None, ...] for k, v in dataset[0].items() if not isinstance(v, int)}
+        dummy_input = (
+            {k: torch.randn(v.shape)[None, ...] for k, v in dataset[0].items() if not isinstance(v, int)}
+            if kwargs.get("return_dummy_input", True)
+            else None
+        )
         class_labels = (
             dataset.features["labels"].names if "labels" in dataset.features.keys() else dataset.features["label"].names
         )
