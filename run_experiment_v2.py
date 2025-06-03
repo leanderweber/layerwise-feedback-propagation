@@ -517,6 +517,8 @@ def run_training_base(
         "snn_reset_mechanism": snn_reset_mechanism,
         "snn_surrogate_disable": snn_surrogate_disable,
         "snn_spike_grad": snn_spike_grad,
+        "snn_apply_noise": snn_apply_noise,
+        "snn_noise_size": snn_apply_noise,
         "optimizer_name": optimizer_name,
         "activation": activation,
         "batch_log": batch_log,

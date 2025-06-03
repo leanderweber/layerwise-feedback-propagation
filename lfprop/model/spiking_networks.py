@@ -443,17 +443,17 @@ class ResNet(LifCNN):
                 **kwargs,
             ),
         )
-        self.block5 = SpikingLayer(
-            NoisyWrapper(tnn.Conv2d(200, 100, 3), self.noise_size, self.apply_noise),
-            snn.Leaky(
-                beta=beta,
-                init_hidden=True,
-                surrogate_disable=surrogate_disable,
-                spike_grad=SPIKE_GRAD_MAP[spike_grad](),
-                reset_delay=reset_delay,
-                **kwargs,
-            ),
-        )
+        # self.block5 = SpikingLayer(
+        #     NoisyWrapper(tnn.Conv2d(200, 100, 3), self.noise_size, self.apply_noise),
+        #     snn.Leaky(
+        #         beta=beta,
+        #         init_hidden=True,
+        #         surrogate_disable=surrogate_disable,
+        #         spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+        #         reset_delay=reset_delay,
+        #         **kwargs,
+        #     ),
+        # )
 
         self.skip_connection = snn.Convolution(
             in_channels=150,
