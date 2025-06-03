@@ -40,6 +40,25 @@ class NoisyWrapper(tnn.Module):
         return self.module.forward(x)
 
 
+class Interpolate(tnn.Module):
+    def __init__(self, size, mode="bilinear", align_corners=False, *args, **kwargs):
+        super().__init__()
+
+        self.size = size
+        self.mode = mode
+        self.align_corners = align_corners
+
+    def forward(self, x):
+        x = tnn.functional.interpolate(
+            x,
+            size=self.size,
+            mode=self.mode,
+            align_corners=self.align_corners,
+        )
+
+        return x
+
+
 class SpikingLayer(tnn.Module):
     """
     Wrapper for parameterized layer (e.g., Linear, Conv) + a Spiking Mechanism (e.g., LIF)
@@ -273,6 +292,7 @@ class LifCNN(LifMLP):
 class DeeperSNN(LifCNN):
     """
     Deeper SNN with more layers
+    Similar to Deeper2024 from https://github.com/aidinattar/snn
     """
 
     def __init__(
@@ -301,7 +321,11 @@ class DeeperSNN(LifCNN):
         # Classifier
         self.classifier = tnn.Sequential(
             SpikingLayer(
-                NoisyWrapper(tnn.Conv2d(n_channels, 30, 3), self.noise_size, self.apply_noise),
+                NoisyWrapper(
+                    tnn.Conv2d(n_channels, 30, 3, padding=2, bias=False),
+                    self.noise_size,
+                    self.apply_noise,
+                ),
                 snn.Leaky(
                     beta=beta,
                     init_hidden=True,
@@ -311,8 +335,13 @@ class DeeperSNN(LifCNN):
                     **kwargs,
                 ),
             ),
+            tnn.MaxPool2d(kernel_size=2, stride=2),
             SpikingLayer(
-                NoisyWrapper(tnn.Conv2d(30, 150, 3), self.noise_size, self.apply_noise),
+                NoisyWrapper(
+                    tnn.Conv2d(30, 150, 3, padding=1, bias=False),
+                    self.noise_size,
+                    self.apply_noise,
+                ),
                 snn.Leaky(
                     beta=beta,
                     init_hidden=True,
@@ -322,8 +351,13 @@ class DeeperSNN(LifCNN):
                     **kwargs,
                 ),
             ),
+            tnn.MaxPool2d(kernel_size=2, stride=2),
             SpikingLayer(
-                NoisyWrapper(tnn.Conv2d(150, 250, 3), self.noise_size, self.apply_noise),
+                NoisyWrapper(
+                    tnn.Conv2d(150, 250, 3, padding=1, bias=False),
+                    self.noise_size,
+                    self.apply_noise,
+                ),
                 snn.Leaky(
                     beta=beta,
                     init_hidden=True,
@@ -333,8 +367,13 @@ class DeeperSNN(LifCNN):
                     **kwargs,
                 ),
             ),
+            tnn.MaxPool2d(kernel_size=2, stride=2),
             SpikingLayer(
-                NoisyWrapper(tnn.Conv2d(250, 200, 3), self.noise_size, self.apply_noise),
+                NoisyWrapper(
+                    tnn.Conv2d(250, 200, 3, padding=2, bias=False),
+                    self.noise_size,
+                    self.apply_noise,
+                ),
                 snn.Leaky(
                     beta=beta,
                     init_hidden=True,
@@ -344,8 +383,13 @@ class DeeperSNN(LifCNN):
                     **kwargs,
                 ),
             ),
+            tnn.MaxPool2d(kernel_size=2, stride=2),
             SpikingLayer(
-                NoisyWrapper(tnn.Conv2d(200, 100, 3), self.noise_size, self.apply_noise),
+                NoisyWrapper(
+                    tnn.Conv2d(200, 100, 3, padding=2, bias=False),
+                    self.noise_size,
+                    self.apply_noise,
+                ),
                 snn.Leaky(
                     beta=beta,
                     init_hidden=True,
@@ -357,7 +401,11 @@ class DeeperSNN(LifCNN):
             ),
             tnn.Flatten(),
             SpikingLayer(
-                NoisyWrapper(tnn.Linear(1000, n_outputs), self.noise_size, self.apply_noise),
+                NoisyWrapper(
+                    tnn.Linear(2500, n_outputs, bias=False),
+                    self.noise_size,
+                    self.apply_noise,
+                ),
                 snn.Leaky(
                     beta=beta,
                     init_hidden=True,
@@ -373,6 +421,7 @@ class DeeperSNN(LifCNN):
 class ResNet(LifCNN):
     """
     ResNet-like architecture using Leaky-Integrate-And-Fire Neurons
+    Similar to ResSNN from https://github.com/aidinattar/snn
     """
 
     def __init__(
@@ -400,7 +449,11 @@ class ResNet(LifCNN):
 
         # Classifier
         self.block1 = SpikingLayer(
-            NoisyWrapper(tnn.Conv2d(n_channels, 30, 5), self.noise_size, self.apply_noise),
+            NoisyWrapper(
+                tnn.Conv2d(n_channels, 30, 5, padding=2, bias=False),
+                self.noise_size,
+                self.apply_noise,
+            ),
             snn.Leaky(
                 beta=beta,
                 init_hidden=True,
@@ -410,8 +463,13 @@ class ResNet(LifCNN):
                 **kwargs,
             ),
         )
+        self.pool1 = tnn.MaxPool2d(kernel_size=2, stride=2)
         self.block2 = SpikingLayer(
-            NoisyWrapper(tnn.Conv2d(30, 150, 3), self.noise_size, self.apply_noise),
+            NoisyWrapper(
+                tnn.Conv2d(30, 150, 3, padding=1, bias=False),
+                self.noise_size,
+                self.apply_noise,
+            ),
             snn.Leaky(
                 beta=beta,
                 init_hidden=True,
@@ -421,8 +479,13 @@ class ResNet(LifCNN):
                 **kwargs,
             ),
         )
+        self.pool2 = tnn.MaxPool2d(kernel_size=2, stride=2)
         self.block3 = SpikingLayer(
-            NoisyWrapper(tnn.Conv2d(150, 250, 3), self.noise_size, self.apply_noise),
+            NoisyWrapper(
+                tnn.Conv2d(150, 250, 3, padding=1, bias=False),
+                self.noise_size,
+                self.apply_noise,
+            ),
             snn.Leaky(
                 beta=beta,
                 init_hidden=True,
@@ -432,8 +495,13 @@ class ResNet(LifCNN):
                 **kwargs,
             ),
         )
+        self.pool3 = tnn.MaxPool2d(kernel_size=3, stride=3)
         self.block4 = SpikingLayer(
-            NoisyWrapper(tnn.Conv2d(250, 200, 4), self.noise_size, self.apply_noise),
+            NoisyWrapper(
+                tnn.Conv2d(250, 200, 4, padding=2, bias=False),
+                self.noise_size,
+                self.apply_noise,
+            ),
             snn.Leaky(
                 beta=beta,
                 init_hidden=True,
@@ -443,22 +511,45 @@ class ResNet(LifCNN):
                 **kwargs,
             ),
         )
-        # self.block5 = SpikingLayer(
-        #     NoisyWrapper(tnn.Conv2d(200, 100, 3), self.noise_size, self.apply_noise),
-        #     snn.Leaky(
-        #         beta=beta,
-        #         init_hidden=True,
-        #         surrogate_disable=surrogate_disable,
-        #         spike_grad=SPIKE_GRAD_MAP[spike_grad](),
-        #         reset_delay=reset_delay,
-        #         **kwargs,
-        #     ),
-        # )
-
-        self.skip_connection = snn.Convolution(
-            in_channels=150,
-            out_channels=250,
-            kernel_size=1,
-            weight_mean=0.8,
-            weight_std=0.05,
+        self.skip_connection = tnn.Sequential(
+            SpikingLayer(
+                tnn.Sequential(
+                    NoisyWrapper(
+                        tnn.Conv2d(150, 250, 1, bias=False),
+                        self.noise_size,
+                        self.apply_noise,
+                    ),
+                    Interpolate(size=None, mode="nearest", align_corners=False),
+                ),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                    **kwargs,
+                ),
+            ),
         )
+
+    def forward(self, x):
+        """
+        Forwards input through network
+        """
+
+        x = self.block1(x)
+        x = self.pool1(x)
+        x = self.block2(x)
+        x = self.pool2(x)
+        self.skip_connection.size = x.shape[2:]
+        x_skip = self.skip_connection(x)
+        x = self.block3(x)
+        x = torch.logical_or(x, x_skip).float()
+        x = self.pool3(x)
+        x = self.block4(x)
+
+        # Return output
+        return x
+
+
+# TODO: Check correct propagator rule for Interpolate

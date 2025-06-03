@@ -19,7 +19,7 @@ from experiment_utils.data import dataloaders, datasets, transforms
 from experiment_utils.evaluation import evaluate
 from experiment_utils.model import models
 from experiment_utils.utils.utils import set_random_seeds
-from lfprop.propagation import propagator_lxt, propagator_vit
+from lfprop.propagation import propagator_lxt, propagator_snn, propagator_vit
 from lfprop.rewards import rewards
 
 warnings.filterwarnings("ignore")
@@ -204,36 +204,36 @@ class Trainer:
         if not fromscratch and savepath:
             self.load(savepath, savename, saveappendage)
 
-        # eval_stats_train = self.eval(train_loader)
-        # eval_stats_test = self.eval(test_loader)
+        eval_stats_train = self.eval(train_loader)
+        eval_stats_test = self.eval(test_loader)
 
-        # print(
-        #     "Train: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
-        #         float(eval_stats_train["criterion"]),
-        #         (
-        #             float(eval_stats_train["accuracy_p050"])
-        #             if "accuracy_p050" in eval_stats_train.keys()
-        #             else float(eval_stats_train["micro_accuracy_top1"])
-        #         ),
-        #     )
-        # )
+        print(
+            "Train: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
+                float(eval_stats_train["criterion"]),
+                (
+                    float(eval_stats_train["accuracy_p050"])
+                    if "accuracy_p050" in eval_stats_train.keys()
+                    else float(eval_stats_train["micro_accuracy_top1"])
+                ),
+            )
+        )
 
-        # print(
-        #     "Test: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
-        #         float(np.mean(eval_stats_test["criterion"])),
-        #         (
-        #             float(eval_stats_test["accuracy_p050"])
-        #             if "accuracy_p050" in eval_stats_test.keys()
-        #             else float(eval_stats_test["micro_accuracy_top1"])
-        #         ),
-        #     )
-        # )
+        print(
+            "Test: Initial Eval: (Criterion) {:.2f}; (Accuracy) {:.2f}".format(
+                float(np.mean(eval_stats_test["criterion"])),
+                (
+                    float(eval_stats_test["accuracy_p050"])
+                    if "accuracy_p050" in eval_stats_test.keys()
+                    else float(eval_stats_test["micro_accuracy_top1"])
+                ),
+            )
+        )
 
-        # logdict = {"epoch": 0}
-        # logdict.update({"train_" + k: v for k, v in eval_stats_train.items()})
-        # logdict.update({"test_" + k: v for k, v in eval_stats_test.items()})
-        # logdict.update({"total_training_time": np.sum(self.clock_times)})
-        # wandb.log(logdict)
+        logdict = {"epoch": 0}
+        logdict.update({"train_" + k: v for k, v in eval_stats_train.items()})
+        logdict.update({"test_" + k: v for k, v in eval_stats_test.items()})
+        logdict.update({"total_training_time": np.sum(self.clock_times)})
+        wandb.log(logdict)
 
         # Store Initial State
         if savepath and epochs > 0:
@@ -567,7 +567,12 @@ def run_training_base(
     )
 
     # Propagation Composite
-    propagator = propagator_vit if model_name == "vit" else propagator_lxt
+    if model_name == "vit":
+        propagator = propagator_vit
+    elif model_name in models.SPIKING_MODEL_MAP:
+        propagator = propagator_snn
+    else:
+        propagator = propagator_lxt
     propagation_composites = {
         "lfp-epsilon": propagator.LFPEpsilonComposite(),
         "vanilla-gradient": None,

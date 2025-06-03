@@ -5,9 +5,7 @@ Propagator for training SNN with LFP
 import torch
 from lxt import rules as lrules
 from zennit import core as zcore
-from zennit import types as ztypes
 
-from ..model import activations
 from ..model.spiking_networks import SpikingLayer
 from .propagator_lxt import ParameterizableComposite, RuleGenerator
 
@@ -61,7 +59,7 @@ class epsilon_lfp_snn_fn(lrules.epsilon_lrp_fn):
         inputs = tuple(inp.detach().requires_grad_() if inp.requires_grad else inp for inp in inputs)
 
         # get parameters to store for backward. Here, we want to accumulate reward, so we do not detach
-        params = [param for _, param in fn.parameterized_layer.named_parameters(recurse=False) if param.requires_grad]
+        params = [param for _, param in fn.parameterized_layer.named_parameters(recurse=True) if param.requires_grad]
         # Reset feedback:
         for param in params:
             if hasattr(param, "feedback"):
@@ -208,16 +206,17 @@ class epsilon_lfp_snn_fn(lrules.epsilon_lrp_fn):
 class LFPSNNEpsilonComposite(ParameterizableComposite):
     def __init__(self, epsilon=1e-6):
         layer_map = {
-            ztypes.Activation: lrules.IdentityRule,
-            activations.Step: lrules.IdentityRule,
-            ztypes.Activation: lrules.IdentityRule,
-            activations.Step: lrules.IdentityRule,
+            # ztypes.Activation: lrules.IdentityRule,
+            # activations.Step: lrules.IdentityRule,
+            # ztypes.Activation: lrules.IdentityRule,
+            # activations.Step: lrules.IdentityRule,
             SpikingLayer: RuleGenerator(
                 LFPEpsilonSNN,
                 epsilon=epsilon,
             ),
             # snn.SpikingNeuron: lrules.StopRelevanceRule,
-            # ztypes.Linear: lrules.StopRelevanceRule,
+            # ztypes.Linear: RuleGenerator(LFPEpsilon,epsilon=epsilon,),
         }
 
+        super().__init__(layer_map=layer_map)
         super().__init__(layer_map=layer_map)
