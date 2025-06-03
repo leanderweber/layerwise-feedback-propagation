@@ -41,19 +41,17 @@ class NoisyWrapper(tnn.Module):
 
 
 class Interpolate(tnn.Module):
-    def __init__(self, size, mode="bilinear", align_corners=False, *args, **kwargs):
+    def __init__(self, size, mode="bilinear", *args, **kwargs):
         super().__init__()
 
         self.size = size
         self.mode = mode
-        self.align_corners = align_corners
 
     def forward(self, x):
         x = tnn.functional.interpolate(
             x,
             size=self.size,
             mode=self.mode,
-            align_corners=self.align_corners,
         )
 
         return x
@@ -284,6 +282,7 @@ class LifCNN(LifMLP):
         """
 
         x = self.classifier(x)
+        print(x[0].grad_fn)
 
         # Return output
         return x
@@ -447,7 +446,9 @@ class ResNet(LifCNN):
             apply_noise=apply_noise,
         )
 
-        # Classifier
+        # Ehhhhh... :/
+        del self.classifier  # Remove the default classifier
+
         self.block1 = SpikingLayer(
             NoisyWrapper(
                 tnn.Conv2d(n_channels, 30, 5, padding=2, bias=False),
@@ -511,24 +512,38 @@ class ResNet(LifCNN):
                 **kwargs,
             ),
         )
-        self.skip_connection = tnn.Sequential(
-            SpikingLayer(
-                tnn.Sequential(
-                    NoisyWrapper(
-                        tnn.Conv2d(150, 250, 1, bias=False),
-                        self.noise_size,
-                        self.apply_noise,
-                    ),
-                    Interpolate(size=None, mode="nearest", align_corners=False),
+        self.skip_connection = SpikingLayer(
+            tnn.Sequential(
+                NoisyWrapper(
+                    tnn.Conv2d(150, 250, 1, bias=False),
+                    self.noise_size,
+                    self.apply_noise,
                 ),
-                snn.Leaky(
-                    beta=beta,
-                    init_hidden=True,
-                    surrogate_disable=surrogate_disable,
-                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
-                    reset_delay=reset_delay,
-                    **kwargs,
-                ),
+                Interpolate(size=(8, 8), mode="nearest"),
+            ),
+            snn.Leaky(
+                beta=beta,
+                init_hidden=True,
+                surrogate_disable=surrogate_disable,
+                spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                reset_delay=reset_delay,
+                **kwargs,
+            ),
+        )
+        self.flatten = tnn.Flatten()
+        self.fc = SpikingLayer(
+            NoisyWrapper(
+                tnn.Linear(1800, n_outputs, bias=False),
+                self.noise_size,
+                self.apply_noise,
+            ),
+            snn.Leaky(
+                beta=beta,
+                init_hidden=True,
+                output=True,
+                surrogate_disable=surrogate_disable,
+                spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                reset_delay=reset_delay,
             ),
         )
 
@@ -541,15 +556,13 @@ class ResNet(LifCNN):
         x = self.pool1(x)
         x = self.block2(x)
         x = self.pool2(x)
-        self.skip_connection.size = x.shape[2:]
         x_skip = self.skip_connection(x)
         x = self.block3(x)
-        x = torch.logical_or(x, x_skip).float()
+        x = torch.max(x, x_skip).float()
         x = self.pool3(x)
         x = self.block4(x)
+        x = self.flatten(x)
+        x = self.fc(x)
 
         # Return output
         return x
-
-
-# TODO: Check correct propagator rule for Interpolate

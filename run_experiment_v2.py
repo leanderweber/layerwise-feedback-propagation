@@ -569,12 +569,15 @@ def run_training_base(
     # Propagation Composite
     if model_name == "vit":
         propagator = propagator_vit
+        is_snn = False
     elif model_name in models.SPIKING_MODEL_MAP:
         propagator = propagator_snn
+        is_snn = True
     else:
         propagator = propagator_lxt
+        is_snn = False
     propagation_composites = {
-        "lfp-epsilon": propagator.LFPEpsilonComposite(),
+        "lfp-epsilon": (propagator.LFPEpsilonComposite() if not is_snn else propagator.LFPSNNEpsilonComposite()),
         "vanilla-gradient": None,
     }
     propagation_composite = propagation_composites[propagator_name]
