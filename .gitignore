@@ -6,7 +6,9 @@ cluster_run/
 configs/vit-training/
 configs/snn-training/
 
-nbs/plot-vit-results.py
+# Some Notebooks
+nbs/plot-vit-results.ipynb
+nbs/plot-snn-results.ipynb
 
 # jupyter notebook checkpoints
 .ipynb_checkpoints
