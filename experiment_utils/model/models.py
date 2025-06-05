@@ -228,6 +228,7 @@ def get_model(model_name, device, **kwargs):
             spike_grad=kwargs.get("spike_grad", "step"),
             apply_noise=kwargs.get("apply_noise", False),
             noise_size=kwargs.get("noise_size", 1e-6),
+            n_linear_inputs=kwargs.get("n_linear_inputs", 1),
         )
         model.forward_fn = forward_fn_spiking
         model.is_huggingface = False

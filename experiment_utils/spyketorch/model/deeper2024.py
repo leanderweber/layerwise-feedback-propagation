@@ -10,12 +10,13 @@
 # Python version:   3.11.7                                                     #
 ################################################################################
 
-import SpykeTorch.functional as sf
 import torch
 import torch.nn as nn
-from network_trainer import NetworkTrainer
-from SpykeTorch import snn
 from torch.nn.parameter import Parameter
+
+from ..network_trainer import NetworkTrainer
+from ..SpykeTorch import functional as sf
+from ..SpykeTorch import snn
 
 
 class DeeperSNN(NetworkTrainer):

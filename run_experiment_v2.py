@@ -518,7 +518,7 @@ def run_training_base(
         "snn_surrogate_disable": snn_surrogate_disable,
         "snn_spike_grad": snn_spike_grad,
         "snn_apply_noise": snn_apply_noise,
-        "snn_noise_size": snn_apply_noise,
+        "snn_noise_size": snn_noise_size,
         "optimizer_name": optimizer_name,
         "activation": activation,
         "batch_log": batch_log,
@@ -582,6 +582,19 @@ def run_training_base(
     }
     propagation_composite = propagation_composites[propagator_name]
 
+    # This is only needed for some SNN models
+    n_linear_inputs = 1
+    if model_name == "deepersnn":
+        if dataset_name == "cifar10":
+            n_linear_inputs = 2500
+        elif dataset_name == "oxford-flowers":
+            n_linear_inputs = 28900
+    elif model_name == "lifresnetlike":
+        if dataset_name == "cifar10":
+            n_linear_inputs = 1800
+        elif dataset_name == "oxford-flowers":
+            n_linear_inputs = 256
+
     # Model
     model = models.get_model(
         model_name,
@@ -599,6 +612,7 @@ def run_training_base(
         spike_grad=snn_spike_grad,
         apply_noise=snn_apply_noise,
         noise_size=snn_noise_size,
+        n_linear_inputs=n_linear_inputs,
     )
 
     # Note: We aim to finetune the model here, so we set the embedding parameters to not require grad.

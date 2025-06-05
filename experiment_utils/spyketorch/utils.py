@@ -12,21 +12,21 @@
 import datetime
 import os
 import random
-import struct
 
-import matplotlib.pyplot as plt
 import numpy as np
 import PIL
 import psutil
-import tonic
+
+# import tonic
 import torch
 import torchvision
 import torchvision.transforms.v2
-from imageio import imwrite
-from s1c1 import S1C1
+
+# from imageio import imwrite
 from sklearn.preprocessing import LabelEncoder
-from SpykeTorch import utils
-from tqdm import tqdm
+
+from .s1c1 import S1C1
+from .SpykeTorch import utils
 
 
 def get_time():
@@ -187,7 +187,7 @@ def get_embeddings_metadata(model, dataloader, device, max_layer=None):
     return embeddings, metadata, label_imgs
 
 
-def prepare_data(dataset, batch_size, augment=False, ratio=1):
+def prepare_data(dataset, root_path, batch_size, augment=False, ratio=1):
     """
     Prepare the data for training
 
@@ -223,7 +223,7 @@ def prepare_data(dataset, batch_size, augment=False, ratio=1):
         filter = utils.Filter(kernels, padding=6, thresholds=50)
         s1c1 = S1C1(filter, timesteps=15)
         if not augment:
-            data_root = "data/"
+            data_root = root_path
             num_classes = 10
             in_channels = 6
             train_data = utils.CacheDataset(
@@ -246,10 +246,20 @@ def prepare_data(dataset, batch_size, augment=False, ratio=1):
             transofrm_augmented = torchvision.transforms.Compose([augmentations, s1c1])
 
             train_data_original = utils.CacheDataset(
-                torchvision.datasets.MNIST(root="data/", train=True, download=True, transform=transform_original)
+                torchvision.datasets.MNIST(
+                    root=root_path,
+                    train=True,
+                    download=True,
+                    transform=transform_original,
+                )
             )
             train_data_augmented = utils.CacheDataset(
-                torchvision.datasets.MNIST(root="data/", train=True, download=True, transform=transofrm_augmented)
+                torchvision.datasets.MNIST(
+                    root=root_path,
+                    train=True,
+                    download=True,
+                    transform=transofrm_augmented,
+                )
             )
 
             if ratio < 1:
@@ -258,10 +268,11 @@ def prepare_data(dataset, batch_size, augment=False, ratio=1):
 
             train_data = torch.utils.data.ConcatDataset([train_data_original, train_data_augmented])
             test_data = utils.CacheDataset(
-                torchvision.datasets.MNIST(root="data/", train=False, download=True, transform=s1c1)
+                torchvision.datasets.MNIST(root=root_path, train=False, download=True, transform=s1c1)
             )
 
     elif dataset == "cifar10":
+        # TODO: Changed default parameters for CIFAR-10 dataset from the original code.
         # kernels = [
         #     utils.DoGKernel(3,3/9,6/9),utils.DoGKernel(3,3/9,6/9),utils.DoGKernel(3,3/9,6/9),
         #     utils.DoGKernel(3,6/9,3/9),utils.DoGKernel(3,6/9,3/9),utils.DoGKernel(3,6/9,3/9),
@@ -299,15 +310,16 @@ def prepare_data(dataset, batch_size, augment=False, ratio=1):
         filter = utils.Filter(kernels, padding=8, thresholds=[40] * len(kernels), multy_channel=True)
 
         # Increase timesteps for temporal encoding
-        s1c1 = S1C1(filter, timesteps=20)
+        s1c1 = S1C1(filter, timesteps=25)
         # # Adjust padding and thresholds based on new kernel sizes
         # filter = utils.Filter(kernels, padding=8, thresholds=[40] * len(kernels))
         # # Increase timesteps for temporal encoding
         # s1c1 = S1C1(filter, timesteps=20)
 
         num_classes = 10
-        data_root = "data/"
+        data_root = root_path
         in_channels = 18
+
         train_data = utils.CacheDataset(
             torchvision.datasets.CIFAR10(root=data_root, train=True, download=True, transform=s1c1)
         )
@@ -320,41 +332,53 @@ def prepare_data(dataset, batch_size, augment=False, ratio=1):
         s1c1 = S1C1(filter, timesteps=15)
 
         num_classes = 47
-        data_root = "data/"
+        data_root = root_path
         in_channels = 6
         train_data = utils.CacheDataset(
-            torchvision.datasets.EMNIST(root=data_root, split="digits", train=True, download=True, transform=s1c1)
+            torchvision.datasets.EMNIST(
+                root=data_root,
+                split="digits",
+                train=True,
+                download=True,
+                transform=s1c1,
+            )
         )
         test_data = utils.CacheDataset(
-            torchvision.datasets.EMNIST(root=data_root, split="digits", train=False, download=True, transform=s1c1)
+            torchvision.datasets.EMNIST(
+                root=data_root,
+                split="digits",
+                train=False,
+                download=True,
+                transform=s1c1,
+            )
         )
-    elif dataset == "nmnist":
-        num_classes = 10
-        data_root = "data/"
-        in_channels = 2
-        trans = tonic.transforms.Compose(
-            [
-                tonic.transforms.Denoise(filter_time=3000),
-                tonic.transforms.ToFrame(sensor_size=tonic.datasets.NMNIST.sensor_size, n_time_bins=15),
-            ]
-        )
-        train_data = utils.CacheDataset(tonic.datasets.NMNIST(save_to=data_root, train=True, transform=trans))
-        test_data = utils.CacheDataset(tonic.datasets.NMNIST(save_to=data_root, train=False, transform=trans))
-    elif dataset == "cifar10-dvs":
-        num_classes = 10
-        data_root = "data/"
-        in_channels = 2
-        trans = tonic.transforms.Compose(
-            [
-                tonic.transforms.Denoise(filter_time=3000),
-                tonic.transforms.ToFrame(sensor_size=tonic.datasets.CIFAR10DVS.sensor_size, n_time_bins=15),
-            ]
-        )
-        full_dataset = tonic.datasets.CIFAR10DVS(save_to=data_root, transform=trans)
-        generator = torch.Generator().manual_seed(42)
-        train_data, test_data = torch.utils.data.random_split(full_dataset, [0.8, 0.2], generator=generator)
-        train_data = utils.CacheDataset(train_data)
-        test_data = utils.CacheDataset(test_data)
+    # elif dataset == "nmnist":
+    #     num_classes = 10
+    #     data_root = root_path
+    #     in_channels = 2
+    #     trans = tonic.transforms.Compose(
+    #         [
+    #             tonic.transforms.Denoise(filter_time=3000),
+    #             tonic.transforms.ToFrame(sensor_size=tonic.datasets.NMNIST.sensor_size, n_time_bins=15),
+    #         ]
+    #     )
+    #     train_data = utils.CacheDataset(tonic.datasets.NMNIST(save_to=data_root, train=True, transform=trans))
+    #     test_data = utils.CacheDataset(tonic.datasets.NMNIST(save_to=data_root, train=False, transform=trans))
+    # elif dataset == "cifar10-dvs":
+    #     num_classes = 10
+    #     data_root = root_path
+    #     in_channels = 2
+    #     trans = tonic.transforms.Compose(
+    #         [
+    #             tonic.transforms.Denoise(filter_time=3000),
+    #             tonic.transforms.ToFrame(sensor_size=tonic.datasets.CIFAR10DVS.sensor_size, n_time_bins=15),
+    #         ]
+    #     )
+    #     full_dataset = tonic.datasets.CIFAR10DVS(save_to=data_root, transform=trans)
+    #     generator = torch.Generator().manual_seed(42)
+    #     train_data, test_data = torch.utils.data.random_split(full_dataset, [0.8, 0.2], generator=generator)
+    #     train_data = utils.CacheDataset(train_data)
+    #     test_data = utils.CacheDataset(test_data)
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
 
@@ -367,12 +391,20 @@ def prepare_data(dataset, batch_size, augment=False, ratio=1):
         train_data, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True
     )
     test_loader = torch.utils.data.DataLoader(
-        test_data, batch_size=len(test_data), shuffle=True, num_workers=4, pin_memory=True
+        test_data,
+        batch_size=len(test_data),
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
     )
     metrics_indices = torch.randperm(len(test_data))[:batch_size]
     metrics_data = torch.utils.data.Subset(test_data, metrics_indices)
     metrics_loader = torch.utils.data.DataLoader(
-        metrics_data, batch_size=len(metrics_data), shuffle=True, num_workers=4, pin_memory=True
+        metrics_data,
+        batch_size=len(metrics_data),
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
     )
     return train_loader, test_loader, metrics_loader, num_classes, in_channels
 
@@ -382,129 +414,145 @@ def is_model_on_cuda(model):
     return next(model.parameters()).is_cuda
 
 
-class SmallNORBDataset:
-    """
-    Code partially taken from https://github.com/ndrplz/small_norb.git
+# class SmallNORBDataset:
+#     """
+#     Code partially taken from https://github.com/ndrplz/small_norb.git
 
-    This script generates the NORB dataset from the raw data files. The NORB dataset
-    is a dataset of stereo images of 3D objects. The dataset is available at
-    https://cs.nyu.edu/~ylclab/data/norb-v1.0-small/. The dataset is divided into
-    two parts: a small dataset and a large dataset. The small dataset contains 24300
-    training examples and 24300 test examples. The large dataset contains 24300
-    training examples and 24300 test examples. The small dataset is used in this
-    script.
+#     This script generates the NORB dataset from the raw data files. The NORB dataset
+#     is a dataset of stereo images of 3D objects. The dataset is available at
+#     https://cs.nyu.edu/~ylclab/data/norb-v1.0-small/. The dataset is divided into
+#     two parts: a small dataset and a large dataset. The small dataset contains 24300
+#     training examples and 24300 test examples. The large dataset contains 24300
+#     training examples and 24300 test examples. The small dataset is used in this
+#     script.
 
-    The dataset is stored for each example as a 96x96 image. The images are stored
-    in jpegs, so they need to be decoded.
+#     The dataset is stored for each example as a 96x96 image. The images are stored
+#     in jpegs, so they need to be decoded.
 
-    The dataset is stored in a binary format. The training set is stored in a file
-    called 'smallnorb-5x46789x9x18x6x2x96x96-training-dat.mat'. The test set is
-    stored in a file called 'smallnorb-5x01235x9x18x6x2x96x96-testing-dat.mat'.
-    The labels for the training set are stored in a file called
-    'smallnorb-5x46789x9x18x6x2x96x96-training-cat.mat'. The labels for the test set
-    are stored in a file called 'smallnorb-5x01235x9x18x6x2x96x96-testing-cat.mat'.
-    """
+#     The dataset is stored in a binary format. The training set is stored in a file
+#     called 'smallnorb-5x46789x9x18x6x2x96x96-training-dat.mat'. The test set is
+#     stored in a file called 'smallnorb-5x01235x9x18x6x2x96x96-testing-dat.mat'.
+#     The labels for the training set are stored in a file called
+#     'smallnorb-5x46789x9x18x6x2x96x96-training-cat.mat'. The labels for the test set
+#     are stored in a file called 'smallnorb-5x01235x9x18x6x2x96x96-testing-cat.mat'.
+#     """
 
-    def __init__(self, dataset_root):
-        self.dataset_root = dataset_root
-        self.dataset_files = self._get_dataset_files()
-        self.data = self._load_data()
+#     def __init__(self, dataset_root):
+#         self.dataset_root = dataset_root
+#         self.dataset_files = self._get_dataset_files()
+#         self.data = self._load_data()
 
-    def _get_dataset_files(self):
-        files = ["cat", "info", "dat"]
-        prefixes = {
-            "train": "smallnorb-5x46789x9x18x6x2x96x96-training",
-            "test": "smallnorb-5x01235x9x18x6x2x96x96-testing",
-        }
-        dataset_files = {
-            split: {f: os.path.join(self.dataset_root, f"{prefixes[split]}-{f}.mat") for f in files}
-            for split in ["train", "test"]
-        }
-        return dataset_files
+#     def _get_dataset_files(self):
+#         files = ["cat", "info", "dat"]
+#         prefixes = {
+#             "train": "smallnorb-5x46789x9x18x6x2x96x96-training",
+#             "test": "smallnorb-5x01235x9x18x6x2x96x96-testing",
+#         }
+#         dataset_files = {
+#             split: {
+#                 f: os.path.join(self.dataset_root, f"{prefixes[split]}-{f}.mat")
+#                 for f in files
+#             }
+#             for split in ["train", "test"]
+#         }
+#         return dataset_files
 
-    def _load_data(self):
-        data = {
-            split: [self._load_example(i, split) for i in tqdm(range(24300), desc=f"Loading {split} data")]
-            for split in ["train", "test"]
-        }
-        return data
+#     def _load_data(self):
+#         data = {
+#             split: [
+#                 self._load_example(i, split)
+#                 for i in tqdm(range(24300), desc=f"Loading {split} data")
+#             ]
+#             for split in ["train", "test"]
+#         }
+#         return data
 
-    def _load_example(self, i, split):
-        example = {}
-        example["category"] = self._load_category(i, split)
-        example["info"] = self._load_info(i, split)
-        example["images"] = self._load_images(i, split)
-        return example
+#     def _load_example(self, i, split):
+#         example = {}
+#         example["category"] = self._load_category(i, split)
+#         example["info"] = self._load_info(i, split)
+#         example["images"] = self._load_images(i, split)
+#         return example
 
-    def _load_category(self, i, split):
-        with open(self.dataset_files[split]["cat"], "rb") as f:
-            f.seek(i * 4 + 20)
-            (category,) = struct.unpack("<i", f.read(4))
-        return category
+#     def _load_category(self, i, split):
+#         with open(self.dataset_files[split]["cat"], "rb") as f:
+#             f.seek(i * 4 + 20)
+#             (category,) = struct.unpack("<i", f.read(4))
+#         return category
 
-    def _load_info(self, i, split):
-        with open(self.dataset_files[split]["info"], "rb") as f:
-            f.seek(i * 16 + 20)
-            info = struct.unpack("<4i", f.read(16))
-        return info
+#     def _load_info(self, i, split):
+#         with open(self.dataset_files[split]["info"], "rb") as f:
+#             f.seek(i * 16 + 20)
+#             info = struct.unpack("<4i", f.read(16))
+#         return info
 
-    def _load_images(self, i, split):
-        with open(self.dataset_files[split]["dat"], "rb") as f:
-            f.seek(i * 2 * 96 * 96 + 24)
-            images = np.fromfile(f, dtype=np.uint8, count=2 * 96 * 96).reshape(2, 96, 96)
-        return images
+#     def _load_images(self, i, split):
+#         with open(self.dataset_files[split]["dat"], "rb") as f:
+#             f.seek(i * 2 * 96 * 96 + 24)
+#             images = np.fromfile(f, dtype=np.uint8, count=2 * 96 * 96).reshape(
+#                 2, 96, 96
+#             )
+#         return images
 
-    def show_random_examples(self, split):
-        fig, axes = plt.subplots(nrows=1, ncols=2)
-        for example in np.random.choice(self.data[split], 5):
-            fig.suptitle(f"Category: {example['category']} Info: {example['info']}")
-            axes[0].imshow(example["images"][0], cmap="gray")
-            axes[1].imshow(example["images"][1], cmap="gray")
-            plt.waitforbuttonpress()
-            plt.cla()
+#     def show_random_examples(self, split):
+#         fig, axes = plt.subplots(nrows=1, ncols=2)
+#         for example in np.random.choice(self.data[split], 5):
+#             fig.suptitle(f"Category: {example['category']} Info: {example['info']}")
+#             axes[0].imshow(example["images"][0], cmap="gray")
+#             axes[1].imshow(example["images"][1], cmap="gray")
+#             plt.waitforbuttonpress()
+#             plt.cla()
 
-    def export_to_jpg(self, export_dir, train_size, test_size):
-        for split in ["train", "test"]:
-            split_dir = os.path.join(export_dir, split)
-            os.makedirs(split_dir, exist_ok=True)
+#     def export_to_jpg(self, export_dir, train_size, test_size):
+#         for split in ["train", "test"]:
+#             split_dir = os.path.join(export_dir, split)
+#             os.makedirs(split_dir, exist_ok=True)
 
-            # Delete everything in the split directory
-            for root, dirs, files in os.walk(split_dir):
-                for file in files:
-                    os.remove(os.path.join(root, file))
-                for dir in dirs:
-                    sub_dir = os.path.join(root, dir)
-                    for sub_root, sub_dirs, sub_files in os.walk(sub_dir):
-                        for sub_file in sub_files:
-                            os.remove(os.path.join(sub_root, sub_file))
-                        for sub_sub_dir in sub_dirs:
-                            os.rmdir(os.path.join(sub_root, sub_sub_dir))
-                    os.rmdir(sub_dir)
+#             # Delete everything in the split directory
+#             for root, dirs, files in os.walk(split_dir):
+#                 for file in files:
+#                     os.remove(os.path.join(root, file))
+#                 for dir in dirs:
+#                     sub_dir = os.path.join(root, dir)
+#                     for sub_root, sub_dirs, sub_files in os.walk(sub_dir):
+#                         for sub_file in sub_files:
+#                             os.remove(os.path.join(sub_root, sub_file))
+#                         for sub_sub_dir in sub_dirs:
+#                             os.rmdir(os.path.join(sub_root, sub_sub_dir))
+#                     os.rmdir(sub_dir)
 
-            if split == "train":
-                size = train_size
-            else:
-                size = test_size
-            for i, example in enumerate(
-                tqdm(self.data[split][:size], desc=f"Exporting {split} images to {export_dir}")
-            ):
-                for j, image in enumerate(example["images"]):
-                    if not os.path.exists(os.path.join(split_dir, str(example["category"]))):
-                        os.makedirs(os.path.join(split_dir, str(example["category"])), exist_ok=True)
-                    # imwrite(os.path.join(split_dir, f'{i:06d}_{example["category"]}_{example["info"][0]}_{j}.jpg'), image)
-                    imwrite(
-                        os.path.join(
-                            split_dir,
-                            str(example["category"]),
-                            f"{i:06d}_{example['category']}_{example['info'][0]}_{j}.jpg",
-                        ),
-                        image,
-                    )
+#             if split == "train":
+#                 size = train_size
+#             else:
+#                 size = test_size
+#             for i, example in enumerate(
+#                 tqdm(
+#                     self.data[split][:size],
+#                     desc=f"Exporting {split} images to {export_dir}",
+#                 )
+#             ):
+#                 for j, image in enumerate(example["images"]):
+#                     if not os.path.exists(
+#                         os.path.join(split_dir, str(example["category"]))
+#                     ):
+#                         os.makedirs(
+#                             os.path.join(split_dir, str(example["category"])),
+#                             exist_ok=True,
+#                         )
+#                     # imwrite(os.path.join(split_dir, f'{i:06d}_{example["category"]}_{example["info"][0]}_{j}.jpg'), image)
+#                     imwrite(
+#                         os.path.join(
+#                             split_dir,
+#                             str(example["category"]),
+#                             f"{i:06d}_{example['category']}_{example['info'][0]}_{j}.jpg",
+#                         ),
+#                         image,
+#                     )
 
 
-def generate_norb_dataset(train_size, test_size, dataset_root, export_dir):
-    dataset = SmallNORBDataset(dataset_root)
-    dataset.export_to_jpg(export_dir, train_size, test_size)
+# def generate_norb_dataset(train_size, test_size, dataset_root, export_dir):
+#     dataset = SmallNORBDataset(dataset_root)
+#     dataset.export_to_jpg(export_dir, train_size, test_size)
 
 
 def memory_usage():

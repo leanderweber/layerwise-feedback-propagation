@@ -9,9 +9,10 @@
 # Python version:   3.11.7                                                     #
 ################################################################################
 
-import SpykeTorch.functional as sf
 import torchvision.transforms as transforms
-from SpykeTorch import utils
+
+from .SpykeTorch import functional as sf
+from .SpykeTorch import utils
 
 
 class S1C1:

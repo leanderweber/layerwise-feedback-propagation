@@ -15,12 +15,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-import torchvision
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
 from tqdm import tqdm
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # Suppress TensorFlow logging
-from torch.utils.tensorboard import SummaryWriter
 
 
 class NetworkTrainer(nn.Module):
@@ -132,11 +130,6 @@ class NetworkTrainer(nn.Module):
         # self.history['train_loss'].append(avg_loss)
         # self.history['train_acc'].append(accuracy)
 
-        # Logging to TensorBoard
-        if self.tensorboard:
-            self.writer.add_scalar("Train/Loss_Iteration", avg_loss, self.iteration)
-            self.writer.add_scalar("Train/Accuracy_Iteration", accuracy, self.iteration)
-
         self.iteration += 1
 
         return perf / len(data)
@@ -231,18 +224,6 @@ class NetworkTrainer(nn.Module):
                 for key in attr:
                     if isinstance(attr[key], nn.Module):
                         attr[key] = attr[key].to(device)
-
-    def define_writer(self, log_dir):
-        """
-        Define a SummaryWriter for TensorBoard
-
-        Parameters
-        ----------
-        log_dir : str
-            Directory to save TensorBoard logs
-        """
-        self.tensorboard = True
-        self.writer = SummaryWriter(log_dir=log_dir)
 
     def save_metrics(self, metrics, file_path="metrics.txt"):
         """
@@ -341,108 +322,6 @@ class NetworkTrainer(nn.Module):
                 plt.axis("off")
             plt.savefig(os.path.join(file_path, f"{name}.png"))
             plt.close()
-
-    def log_tensorboard(self, metrics, epoch):
-        """
-        Log metrics to TensorBoard
-
-        Parameters
-        ----------
-        metrics : dict
-            Dictionary containing evaluation metrics
-        epoch : int
-            Current epoch number
-        """
-        for key, value in metrics.items():
-            if key == "confusion_matrix":
-                fig, ax = plt.subplots()
-                cax = ax.matshow(value, cmap="coolwarm")
-                fig.colorbar(cax)
-                plt.xlabel("True Label")
-                plt.ylabel("Predicted Label")
-                if self.tensorboard:
-                    self.writer.add_figure("Confusion Matrix", fig, epoch)
-            else:
-                if self.tensorboard:
-                    self.writer.add_scalar(key, value, epoch)
-
-    def close_tensorboard(self):
-        """
-        Close TensorBoard writer
-        """
-        if self.tensorboard:
-            self.writer.close()
-
-    def log_model(self, input_size):
-        """
-        Log the model graph to TensorBoard
-
-        Parameters
-        ----------
-        input_size : tuple
-            The size of the input tensor
-        """
-        if not self.tensorboard:
-            return
-        dummy_input = torch.zeros(*input_size).to(self.device)
-        self.writer.add_graph(self, dummy_input)
-        self.summary(input_size)
-
-    def log_inputs(self, data, epoch, tag="Inputs"):
-        """
-        Log input images to TensorBoard
-
-        Parameters
-        ----------
-        data : torch.Tensor
-            Input data
-        epoch : int
-            Current epoch number
-        tag : str
-            Tag for the input data in TensorBoard
-        """
-        if not self.tensorboard:
-            return
-
-        # Select the first sample and move it to the device
-        data = data.to(self.device)
-
-        # Get the number of channels and temporal dimension
-        temporal_dim, n_channels, height, width = data.size()[1:]
-
-        # Log each time step separately
-        for t in range(temporal_dim):
-            # Extract the time step
-            time_step_data = data[:, t, :, :, :]
-            # Make a grid
-            grid = torchvision.utils.make_grid(time_step_data)
-            # Log the grid
-            self.writer.add_image(f"{tag}/TimeStep_{t}", grid, epoch)
-
-    def log_embedding(self, embeddings, metadata, label_img, epoch, tag="Embedding"):
-        """
-        Log embeddings to TensorBoard
-
-        Parameters
-        ----------
-        embeddings : torch.Tensor
-            Embeddings to visualize
-        metadata : list
-            Metadata corresponding to the embeddings
-        label_img : torch.Tensor
-            Images corresponding to the embeddings
-        epoch : int
-            Current epoch number
-        tag : str
-            Tag for the embeddings in TensorBoard
-        """
-        if not self.tensorboard:
-            return
-
-        # Flatten the label_img from (N, C, T, H, W) to (N, C, H, W) by averaging over T
-        label_img_flat = label_img.mean(dim=2)
-
-        self.writer.add_embedding(embeddings, metadata, label_img_flat, global_step=epoch, tag=tag)
 
     def summary(self, input_size):
         def register_hook(module):

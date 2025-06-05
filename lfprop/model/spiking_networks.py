@@ -282,7 +282,6 @@ class LifCNN(LifMLP):
         """
 
         x = self.classifier(x)
-        print(x[0].grad_fn)
 
         # Return output
         return x
@@ -304,6 +303,7 @@ class DeeperSNN(LifCNN):
         noise_size=1e-6,
         apply_noise=True,
         reset_delay=True,
+        n_linear_inputs=2500,
         **kwargs,
     ):
         super().__init__(
@@ -316,6 +316,8 @@ class DeeperSNN(LifCNN):
             noise_size=noise_size,
             apply_noise=apply_noise,
         )
+
+        self.n_linear_inputs = n_linear_inputs
 
         # Classifier
         self.classifier = tnn.Sequential(
@@ -401,7 +403,7 @@ class DeeperSNN(LifCNN):
             tnn.Flatten(),
             SpikingLayer(
                 NoisyWrapper(
-                    tnn.Linear(2500, n_outputs, bias=False),
+                    tnn.Linear(self.n_linear_inputs, n_outputs, bias=False),
                     self.noise_size,
                     self.apply_noise,
                 ),
@@ -433,6 +435,7 @@ class ResNet(LifCNN):
         noise_size=1e-6,
         apply_noise=True,
         reset_delay=True,
+        n_linear_inputs=1800,
         **kwargs,
     ):
         super().__init__(
@@ -445,6 +448,8 @@ class ResNet(LifCNN):
             noise_size=noise_size,
             apply_noise=apply_noise,
         )
+
+        self.n_linear_inputs = n_linear_inputs
 
         # Ehhhhh... :/
         del self.classifier  # Remove the default classifier
@@ -533,7 +538,7 @@ class ResNet(LifCNN):
         self.flatten = tnn.Flatten()
         self.fc = SpikingLayer(
             NoisyWrapper(
-                tnn.Linear(1800, n_outputs, bias=False),
+                tnn.Linear(self.n_linear_inputs, n_outputs, bias=False),
                 self.noise_size,
                 self.apply_noise,
             ),
