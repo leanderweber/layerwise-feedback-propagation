@@ -150,10 +150,10 @@ def run_training_stdp(
                 training_time += elapsed
                 iterator.set_postfix({"Iteration": i + 1})
                 i += 1
-                logdict = {"total_training_time": elapsed}
+                logdict = {"total_training_time": training_time}
                 wandb.log(logdict)
         torch.save(model.state_dict(), first_layer_name)
-    joblib.dump(elapsed, os.path.join(savepath, "elapsed.joblib"))
+    joblib.dump(training_time, os.path.join(savepath, "elapsed.joblib"))
 
     # Second layer
     second_layer_name = f"{savepath}/models/{model_name}_{dataset_name}{'_augmented' if not augment else ''}{'_ratio_' + str(ratio) if ratio < 1.0 else ''}_second_layer.pth"
@@ -176,10 +176,10 @@ def run_training_stdp(
                 training_time += elapsed
                 iterator.set_postfix({"Iteration": i + 1})
                 i += 1
-                logdict = {"total_training_time": elapsed}
+                logdict = {"total_training_time": training_time}
                 wandb.log(logdict)
         torch.save(model.state_dict(), second_layer_name)
-    joblib.dump(elapsed, os.path.join(savepath, "elapsed.joblib"))
+    joblib.dump(training_time, os.path.join(savepath, "elapsed.joblib"))
 
     # Third layer
     third_layer_name = f"{savepath}/models/{model_name}_{dataset_name}{'_augmented' if not augment else ''}{'_ratio_' + str(ratio) if ratio < 1.0 else ''}_third_layer.pth"
@@ -202,10 +202,10 @@ def run_training_stdp(
                 training_time += elapsed
                 iterator.set_postfix({"Iteration": i + 1})
                 i += 1
-                logdict = {"total_training_time": elapsed}
+                logdict = {"total_training_time": training_time}
                 wandb.log(logdict)
         torch.save(model.state_dict(), third_layer_name)
-    joblib.dump(elapsed, os.path.join(savepath, "elapsed.joblib"))
+    joblib.dump(training_time, os.path.join(savepath, "elapsed.joblib"))
 
     if model_name == "deepersnn":
         # Fourth layer
@@ -231,10 +231,10 @@ def run_training_stdp(
                     training_time += elapsed
                     iterator.set_postfix({"Iteration": i + 1})
                     i += 1
-                logdict = {"total_training_time": elapsed}
+                logdict = {"total_training_time": training_time}
                 wandb.log(logdict)
             torch.save(model.state_dict(), fourth_layer_name)
-    joblib.dump(elapsed, os.path.join(savepath, "elapsed.joblib"))
+    joblib.dump(training_time, os.path.join(savepath, "elapsed.joblib"))
 
     # Train the R-STDP layer
     # Set learning rates
@@ -344,12 +344,14 @@ def run_training_stdp(
             {"test_micro_accuracy_top1": total_correct_test / total_samples_test}
         )
         logdict.update({"test_criterion": total_loss_test / total_samples_test})
-        logdict.update({"total_training_time": elapsed})
+        logdict.update({"total_training_time": training_time})
         wandb.log(logdict)
 
         # Log test performance to TensorBoard
         model.history["test_acc"].append(total_correct_test / total_samples_test)
         model.history["test_loss"].append(total_loss_test / total_samples_test)
+
+    joblib.dump(training_time, os.path.join(savepath, "elapsed.joblib"))
 
     # Save training history
     model.save_history(
