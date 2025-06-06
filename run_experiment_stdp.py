@@ -128,6 +128,9 @@ def run_training_stdp(
     # Train the model           #
     #############################
     training_time = 0.0
+    if os.path.exists(os.path.join(savepath, "elapsed.joblib")):
+        training_time = joblib.load(os.path.join(savepath, "elapsed.joblib"))
+        print(f"Loaded previous training time: {training_time:.2f} seconds")
 
     # First layer
     first_layer_name = f"{savepath}/models/{model_name}_{dataset_name}{'_augmented' if not augment else ''}{'_ratio_' + str(ratio) if ratio < 1.0 else ''}_first_layer.pth"
@@ -140,7 +143,7 @@ def run_training_stdp(
         for epoch in iterator:
             i = 0
             iterator_epoch = tqdm(
-                train_loader, desc=f"Epoch {epoch}", position=1, leave=False
+                train_loader, desc=f"Epoch {epoch}", position=1, leave=False, disable=True
             )
             for i, (data, _) in enumerate(iterator_epoch):
                 data = data.to(device)
@@ -166,7 +169,7 @@ def run_training_stdp(
         for epoch in iterator:
             i = 0
             iterator_epoch = tqdm(
-                train_loader, desc=f"Epoch {epoch}", position=1, leave=False
+                train_loader, desc=f"Epoch {epoch}", position=1, leave=False, disable=True
             )
             for data, _ in iterator_epoch:
                 data = data.to(device)
@@ -192,7 +195,7 @@ def run_training_stdp(
         for epoch in iterator:
             i = 0
             iterator_epoch = tqdm(
-                train_loader, desc=f"Epoch {epoch}", position=1, leave=False
+                train_loader, desc=f"Epoch {epoch}", position=1, leave=False, disable=True
             )
             for data, _ in iterator_epoch:
                 data = data.to(device)
@@ -221,7 +224,7 @@ def run_training_stdp(
             for epoch in iterator:
                 i = 0
                 iterator_epoch = tqdm(
-                    train_loader, desc=f"Epoch {epoch}", position=1, leave=False
+                    train_loader, desc=f"Epoch {epoch}", position=1, leave=False, disable=True
                 )
                 for data, _ in iterator_epoch:
                     data = data.to(device)
@@ -264,7 +267,7 @@ def run_training_stdp(
         total_samples_train = 0
         i = 0
         iterator_epoch = tqdm(
-            train_loader, desc=f"Training epoch {epoch}", position=1, leave=False
+            train_loader, desc=f"Training epoch {epoch}", position=1, leave=False, disable=True
         )
         for k, (data, targets) in enumerate(iterator_epoch):
             start_time = time.time()
