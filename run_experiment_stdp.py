@@ -153,8 +153,8 @@ def run_training_stdp(
                 training_time += elapsed
                 iterator.set_postfix({"Iteration": i + 1})
                 i += 1
-                logdict = {"total_training_time": training_time}
-                wandb.log(logdict)
+            logdict = {"total_training_time": training_time}
+            wandb.log(logdict)
         torch.save(model.state_dict(), first_layer_name)
     joblib.dump(training_time, os.path.join(savepath, "elapsed.joblib"))
 
@@ -179,8 +179,8 @@ def run_training_stdp(
                 training_time += elapsed
                 iterator.set_postfix({"Iteration": i + 1})
                 i += 1
-                logdict = {"total_training_time": training_time}
-                wandb.log(logdict)
+            logdict = {"total_training_time": training_time}
+            wandb.log(logdict)
         torch.save(model.state_dict(), second_layer_name)
     joblib.dump(training_time, os.path.join(savepath, "elapsed.joblib"))
 
@@ -205,8 +205,8 @@ def run_training_stdp(
                 training_time += elapsed
                 iterator.set_postfix({"Iteration": i + 1})
                 i += 1
-                logdict = {"total_training_time": training_time}
-                wandb.log(logdict)
+            logdict = {"total_training_time": training_time}
+            wandb.log(logdict)
         torch.save(model.state_dict(), third_layer_name)
     joblib.dump(training_time, os.path.join(savepath, "elapsed.joblib"))
 
@@ -234,8 +234,8 @@ def run_training_stdp(
                     training_time += elapsed
                     iterator.set_postfix({"Iteration": i + 1})
                     i += 1
-                logdict = {"total_training_time": training_time}
-                wandb.log(logdict)
+            logdict = {"total_training_time": training_time}
+            wandb.log(logdict)
             torch.save(model.state_dict(), fourth_layer_name)
     joblib.dump(training_time, os.path.join(savepath, "elapsed.joblib"))
 
