@@ -15,7 +15,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+)
 from tqdm import tqdm
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # Suppress TensorFlow logging
@@ -35,8 +41,15 @@ class NetworkTrainer(nn.Module):
             "winners": None,
         }
         neurons_per_class = 20
-        self.decision_map = [i for i in range(num_classes) for _ in range(neurons_per_class)]
-        self.history = {"train_acc": [], "train_loss": [], "test_acc": [], "test_loss": []}
+        self.decision_map = [
+            i for i in range(num_classes) for _ in range(neurons_per_class)
+        ]
+        self.history = {
+            "train_acc": [],
+            "train_loss": [],
+            "test_acc": [],
+            "test_loss": [],
+        }
         self.activation_maps = {}
         self.tensorboard = tensorboard
         # if self.tensorboard:
@@ -75,7 +88,14 @@ class NetworkTrainer(nn.Module):
         """
         self.train()
 
-        iterator = tqdm(data, total=len(data), desc="Processing data", position=2, leave=False)
+        iterator = tqdm(
+            data,
+            total=len(data),
+            desc="Processing data",
+            position=2,
+            leave=False,
+            disable=True,
+        )
         for data_in in iterator:
             data_in = data_in.to(self.device)
             self(data_in, layer_idx)
@@ -105,7 +125,14 @@ class NetworkTrainer(nn.Module):
         self.train()
         perf = np.array([0, 0, 0])  # correct, wrong, silence
 
-        iterator = tqdm(zip(data, target), total=len(data), desc="Processing data", position=2, leave=False)
+        iterator = tqdm(
+            zip(data, target),
+            total=len(data),
+            desc="Processing data",
+            position=2,
+            leave=False,
+            disable=True,
+        )
         for data_in, target_in in iterator:
             data_in = data_in.to(self.device)
             target_in = target_in.to(self.device)
@@ -211,7 +238,9 @@ class NetworkTrainer(nn.Module):
             "f1_score": f1_score(self.all_targets, self.all_preds, average="macro"),
             "accuracy": accuracy_score(self.all_targets, self.all_preds),
             "recall": recall_score(self.all_targets, self.all_preds, average="macro"),
-            "precision": precision_score(self.all_targets, self.all_preds, average="macro"),
+            "precision": precision_score(
+                self.all_targets, self.all_preds, average="macro"
+            ),
         }
         return metrics
 
@@ -220,7 +249,9 @@ class NetworkTrainer(nn.Module):
         super(NetworkTrainer, self).to(device)
         for attr_name in dir(self):
             attr = getattr(self, attr_name)
-            if isinstance(attr, dict) and all(isinstance(v, nn.Module) for v in attr.values()):
+            if isinstance(attr, dict) and all(
+                isinstance(v, nn.Module) for v in attr.values()
+            ):
                 for key in attr:
                     if isinstance(attr[key], nn.Module):
                         attr[key] = attr[key].to(device)
@@ -299,7 +330,9 @@ class NetworkTrainer(nn.Module):
         def hook_fn(module, input, output):
             class_name = module.__class__.__name__
             module_idx = len(self.activation_maps)
-            self.activation_maps[f"{class_name}_{module_idx}"] = output.detach().cpu().numpy()
+            self.activation_maps[f"{class_name}_{module_idx}"] = (
+                output.detach().cpu().numpy()
+            )
 
         for layer in self.children():
             layer.register_forward_hook(hook_fn)
@@ -333,7 +366,9 @@ class NetworkTrainer(nn.Module):
                 summary[m_key] = {}
                 summary[m_key]["input_shape"] = list(input[0].size())
                 if isinstance(output, (list, tuple)):
-                    summary[m_key]["output_shape"] = [[-1] + list(o.size())[1:] for o in output]
+                    summary[m_key]["output_shape"] = [
+                        [-1] + list(o.size())[1:] for o in output
+                    ]
                 else:
                     summary[m_key]["output_shape"] = list(output.size())
 
@@ -345,7 +380,11 @@ class NetworkTrainer(nn.Module):
                     params += torch.prod(torch.tensor(module.bias.size()))
                 summary[m_key]["nb_params"] = params
 
-            if not isinstance(module, nn.Sequential) and not isinstance(module, nn.ModuleList) and not (module == self):
+            if (
+                not isinstance(module, nn.Sequential)
+                and not isinstance(module, nn.ModuleList)
+                and not (module == self)
+            ):
                 hooks.append(module.register_forward_hook(hook))
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -363,7 +402,9 @@ class NetworkTrainer(nn.Module):
             hook.remove()
 
         print("----------------------------------------------------------------")
-        line_new = "{:>20}  {:>25} {:>15}".format("Layer (type)", "Output Shape", "Param #")
+        line_new = "{:>20}  {:>25} {:>15}".format(
+            "Layer (type)", "Output Shape", "Param #"
+        )
         print(line_new)
         print("================================================================")
         total_params = 0
@@ -376,12 +417,16 @@ class NetworkTrainer(nn.Module):
                 "{0:,}".format(summary[layer]["nb_params"]),
             )
             total_params += summary[layer]["nb_params"]
-            total_output += torch.prod(torch.tensor(summary[layer]["output_shape"])).item()
+            total_output += torch.prod(
+                torch.tensor(summary[layer]["output_shape"])
+            ).item()
             if "trainable" in summary[layer] and summary[layer]["trainable"]:
                 trainable_params += summary[layer]["nb_params"]
             print(line_new)
 
-        total_input_size = abs(torch.prod(torch.tensor(input_size)).item() * 4.0 / (1024**2.0))
+        total_input_size = abs(
+            torch.prod(torch.tensor(input_size)).item() * 4.0 / (1024**2.0)
+        )
         total_output_size = abs(2.0 * total_output * 4.0 / (1024**2.0))
         total_params_size = abs(total_params.numpy() * 4.0 / (1024**2.0))
 
@@ -393,7 +438,10 @@ class NetworkTrainer(nn.Module):
         print("Input size (MB): %0.2f" % total_input_size)
         print("Forward/backward pass size (MB): %0.2f" % total_output_size)
         print("Params size (MB): %0.2f" % total_params_size)
-        print("Estimated Total Size (MB): %0.2f" % (total_input_size + total_output_size + total_params_size))
+        print(
+            "Estimated Total Size (MB): %0.2f"
+            % (total_input_size + total_output_size + total_params_size)
+        )
         print("----------------------------------------------------------------")
 
     def get_embeddings(self, input, max_layer=4):
@@ -413,6 +461,18 @@ class NetworkTrainer(nn.Module):
             Embeddings from the network
         """
         output = self.forward(input, max_layer)
+
+        # Convert the output to a tensor if it's an integer
+        if isinstance(output, int):
+            output = torch.tensor([output], device=self.device)
+
+        return output
+
+        # Convert the output to a tensor if it's an integer
+        if isinstance(output, int):
+            output = torch.tensor([output], device=self.device)
+
+        return output
 
         # Convert the output to a tensor if it's an integer
         if isinstance(output, int):

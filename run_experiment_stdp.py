@@ -8,17 +8,16 @@ import time
 from argparse import ArgumentParser
 from types import SimpleNamespace
 
+import experiment_utils.spyketorch.utils as utils
 import joblib
 import numpy as np
 import torch
 import wandb
 import yaml
-from tqdm import tqdm
-
-import experiment_utils.spyketorch.utils as utils
 from experiment_utils.spyketorch.model.deeper2024 import DeeperSNN
 from experiment_utils.spyketorch.model.resnet2024 import ResSNN
 from experiment_utils.utils.utils import set_random_seeds
+from tqdm import tqdm
 
 
 def run_training_stdp(
@@ -95,8 +94,8 @@ def run_training_stdp(
     # Data
     print("Loading Initial State...")
     # with nostdout(verbose=verbose):
-    train_loader, test_loader, metrics_loader, num_classes, in_channels = utils.prepare_data(
-        dataset_name, data_path, batch_size, augment=False
+    train_loader, test_loader, metrics_loader, num_classes, in_channels = (
+        utils.prepare_data(dataset_name, data_path, batch_size, augment=False)
     )
 
     # Initialize the model
@@ -136,10 +135,13 @@ def run_training_stdp(
         print("Loading first layer model")
         model.load_state_dict(torch.load(first_layer_name), strict=False)
     else:
-        iterator = tqdm(range(epochs[0]), desc="Training First Layer")
+        print("Training First Layer")
+        iterator = tqdm(range(epochs[0]), desc="Training First Layer", disable=True)
         for epoch in iterator:
             i = 0
-            iterator_epoch = tqdm(train_loader, desc=f"Epoch {epoch}", position=1, leave=False)
+            iterator_epoch = tqdm(
+                train_loader, desc=f"Epoch {epoch}", position=1, leave=False
+            )
             for i, (data, _) in enumerate(iterator_epoch):
                 data = data.to(device)
                 start_time = time.time()
@@ -148,7 +150,10 @@ def run_training_stdp(
                 training_time += elapsed
                 iterator.set_postfix({"Iteration": i + 1})
                 i += 1
+                logdict = {"total_training_time": elapsed}
+                wandb.log(logdict)
         torch.save(model.state_dict(), first_layer_name)
+    joblib.dump(elapsed, os.path.join(savepath, "elapsed.joblib"))
 
     # Second layer
     second_layer_name = f"{savepath}/models/{model_name}_{dataset_name}{'_augmented' if not augment else ''}{'_ratio_' + str(ratio) if ratio < 1.0 else ''}_second_layer.pth"
@@ -156,10 +161,13 @@ def run_training_stdp(
         print("Loading second layer model")
         model.load_state_dict(torch.load(second_layer_name), strict=False)
     else:
-        iterator = tqdm(range(epochs[1]), desc="Training Second Layer")
+        print("Training Second Layer")
+        iterator = tqdm(range(epochs[1]), desc="Training Second Layer", disable=True)
         for epoch in iterator:
             i = 0
-            iterator_epoch = tqdm(train_loader, desc=f"Epoch {epoch}", position=1, leave=False)
+            iterator_epoch = tqdm(
+                train_loader, desc=f"Epoch {epoch}", position=1, leave=False
+            )
             for data, _ in iterator_epoch:
                 data = data.to(device)
                 start_time = time.time()
@@ -168,7 +176,10 @@ def run_training_stdp(
                 training_time += elapsed
                 iterator.set_postfix({"Iteration": i + 1})
                 i += 1
+                logdict = {"total_training_time": elapsed}
+                wandb.log(logdict)
         torch.save(model.state_dict(), second_layer_name)
+    joblib.dump(elapsed, os.path.join(savepath, "elapsed.joblib"))
 
     # Third layer
     third_layer_name = f"{savepath}/models/{model_name}_{dataset_name}{'_augmented' if not augment else ''}{'_ratio_' + str(ratio) if ratio < 1.0 else ''}_third_layer.pth"
@@ -176,10 +187,13 @@ def run_training_stdp(
         print("Loading third layer model")
         model.load_state_dict(torch.load(third_layer_name), strict=False)
     else:
-        iterator = tqdm(range(epochs[2]), desc="Training Third Layer")
+        print("Training Third Layer")
+        iterator = tqdm(range(epochs[2]), desc="Training Third Layer", disable=True)
         for epoch in iterator:
             i = 0
-            iterator_epoch = tqdm(train_loader, desc=f"Epoch {epoch}", position=1, leave=False)
+            iterator_epoch = tqdm(
+                train_loader, desc=f"Epoch {epoch}", position=1, leave=False
+            )
             for data, _ in iterator_epoch:
                 data = data.to(device)
                 start_time = time.time()
@@ -188,7 +202,10 @@ def run_training_stdp(
                 training_time += elapsed
                 iterator.set_postfix({"Iteration": i + 1})
                 i += 1
+                logdict = {"total_training_time": elapsed}
+                wandb.log(logdict)
         torch.save(model.state_dict(), third_layer_name)
+    joblib.dump(elapsed, os.path.join(savepath, "elapsed.joblib"))
 
     if model_name == "deepersnn":
         # Fourth layer
@@ -197,10 +214,15 @@ def run_training_stdp(
             print("Loading fourth layer model")
             model.load_state_dict(torch.load(fourth_layer_name), strict=False)
         else:
-            iterator = tqdm(range(epochs[3]), desc="Training Fourth Layer")
+            print("Training Fourth Layer")
+            iterator = tqdm(
+                range(epochs[3]), desc="Training Fourth Layer", disable=True
+            )
             for epoch in iterator:
                 i = 0
-                iterator_epoch = tqdm(train_loader, desc=f"Epoch {epoch}", position=1, leave=False)
+                iterator_epoch = tqdm(
+                    train_loader, desc=f"Epoch {epoch}", position=1, leave=False
+                )
                 for data, _ in iterator_epoch:
                     data = data.to(device)
                     start_time = time.time()
@@ -209,7 +231,10 @@ def run_training_stdp(
                     training_time += elapsed
                     iterator.set_postfix({"Iteration": i + 1})
                     i += 1
+                logdict = {"total_training_time": elapsed}
+                wandb.log(logdict)
             torch.save(model.state_dict(), fourth_layer_name)
+    joblib.dump(elapsed, os.path.join(savepath, "elapsed.joblib"))
 
     # Train the R-STDP layer
     # Set learning rates
@@ -230,7 +255,7 @@ def run_training_stdp(
     best_train = np.array([0.0, 0.0, 0.0, 0.0])  # correct, total, loss, epoch
     best_test = np.array([0.0, 0.0, 0.0, 0.0])  # correct, total, loss, epoch
 
-    iterator = tqdm(range(final_epochs), desc="Training R STDP Layer")
+    iterator = tqdm(range(final_epochs), desc="Training R STDP Layer", disable=True)
     for epoch in iterator:
         model.epoch = epoch
         perf_train = np.array([0.0, 0.0, 0.0])
@@ -238,7 +263,9 @@ def run_training_stdp(
         total_loss_train = 0
         total_samples_train = 0
         i = 0
-        iterator_epoch = tqdm(train_loader, desc=f"Training epoch {epoch}", position=1, leave=False)
+        iterator_epoch = tqdm(
+            train_loader, desc=f"Training epoch {epoch}", position=1, leave=False
+        )
         for k, (data, targets) in enumerate(iterator_epoch):
             start_time = time.time()
             perf_train_batch = model.train_rl(data, targets, layer_idx=max_layers)
@@ -309,9 +336,13 @@ def run_training_stdp(
             total_samples_test += np.sum(perf_test)
 
         logdict = {"epoch": epoch + 1}
-        logdict.update({"train_micro_accuracy_top1": total_correct_train / total_samples_train})
+        logdict.update(
+            {"train_micro_accuracy_top1": total_correct_train / total_samples_train}
+        )
         logdict.update({"train_criterion": total_loss_train / total_samples_train})
-        logdict.update({"test_micro_accuracy_top1": total_correct_test / total_samples_test})
+        logdict.update(
+            {"test_micro_accuracy_top1": total_correct_test / total_samples_test}
+        )
         logdict.update({"test_criterion": total_loss_test / total_samples_test})
         logdict.update({"total_training_time": elapsed})
         wandb.log(logdict)
@@ -321,10 +352,14 @@ def run_training_stdp(
         model.history["test_loss"].append(total_loss_test / total_samples_test)
 
     # Save training history
-    model.save_history(file_path=f"{savepath}/models/{model_name}_{dataset_name}_history.csv")
+    model.save_history(
+        file_path=f"{savepath}/models/{model_name}_{dataset_name}_history.csv"
+    )
 
     # Save activation maps
-    model.save_activation_maps(file_path=f"{savepath}/models/{model_name}_{dataset_name}_activation_maps")
+    model.save_activation_maps(
+        file_path=f"{savepath}/models/{model_name}_{dataset_name}_activation_maps"
+    )
 
 
 def get_args():
