@@ -24,14 +24,13 @@ For more details, refer to our [Paper](https://arxiv.org/abs/2308.12053).
 
 If you use this package in your research, please cite
 ```bibtex
-@article{
-weber2025efficient,
-title={Efficient and Flexible Neural Network Training through Layer-wise Feedback Propagation},
-author={Leander Weber and Jim Berend and Moritz Weckbecker and Alexander Binder and Thomas Wiegand and Wojciech Samek and Sebastian Lapuschkin},
-journal={Transactions on Machine Learning Research},
-issn={2835-8856},
-year={2025},
-url={https://openreview.net/forum?id=9oToxYVOSW},
+@article{weber2025efficient,
+  title={Efficient and Flexible Neural Network Training through Layer-wise Feedback Propagation},
+  author={Leander Weber and Jim Berend and Moritz Weckbecker and Alexander Binder and Thomas Wiegand and Wojciech Samek and Sebastian Lapuschkin},
+  journal={Transactions on Machine Learning Research},
+  issn={2835-8856},
+  year={2025},
+  url={https://openreview.net/forum?id=9oToxYVOSW},
 }
 ```
 
