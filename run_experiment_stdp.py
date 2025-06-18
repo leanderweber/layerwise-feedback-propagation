@@ -1,5 +1,6 @@
 ################################################################################
-# Description: This is based on the train.py from https://github.com/aidinattar/snn                                       #
+# Description: This is based on the train.py from
+# https://github.com/aidinattar/snn                                       #
 ################################################################################
 
 import logging
@@ -8,16 +9,17 @@ import time
 from argparse import ArgumentParser
 from types import SimpleNamespace
 
-import experiment_utils.spyketorch.utils as utils
 import joblib
 import numpy as np
 import torch
 import wandb
 import yaml
+from tqdm import tqdm
+
+import experiment_utils.spyketorch.utils as utils
 from experiment_utils.spyketorch.model.deeper2024 import DeeperSNN
 from experiment_utils.spyketorch.model.resnet2024 import ResSNN
 from experiment_utils.utils.utils import set_random_seeds
-from tqdm import tqdm
 
 
 def run_training_stdp(
@@ -94,8 +96,8 @@ def run_training_stdp(
     # Data
     print("Loading Initial State...")
     # with nostdout(verbose=verbose):
-    train_loader, test_loader, metrics_loader, num_classes, in_channels = (
-        utils.prepare_data(dataset_name, data_path, batch_size, augment=False)
+    train_loader, test_loader, metrics_loader, num_classes, in_channels = utils.prepare_data(
+        dataset_name, data_path, batch_size, augment=False
     )
 
     # Initialize the model
@@ -133,7 +135,8 @@ def run_training_stdp(
         print(f"Loaded previous training time: {training_time:.2f} seconds")
 
     # First layer
-    first_layer_name = f"{savepath}/models/{model_name}_{dataset_name}{'_augmented' if not augment else ''}{'_ratio_' + str(ratio) if ratio < 1.0 else ''}_first_layer.pth"
+    first_layer_name = f"{savepath}/models/{model_name}_{dataset_name}{'_augmented' if not augment else ''}"
+    first_layer_name += f"{'_ratio_' + str(ratio) if ratio < 1.0 else ''}_first_layer.pth"
     if os.path.isfile(first_layer_name):
         print("Loading first layer model")
         model.load_state_dict(torch.load(first_layer_name), strict=False)
@@ -143,23 +146,28 @@ def run_training_stdp(
         for epoch in iterator:
             i = 0
             iterator_epoch = tqdm(
-                train_loader, desc=f"Epoch {epoch}", position=1, leave=False, disable=True
+                train_loader,
+                desc=f"Epoch {epoch}",
+                position=1,
+                leave=False,
+                disable=True,
             )
             for i, (data, _) in enumerate(iterator_epoch):
-                data = data.to(device)
+                data = data.to(device)  # noqa: PLW2901
                 start_time = time.time()
                 model.train_unsupervised(data, layer_idx=1)
                 elapsed = time.time() - start_time
                 training_time += elapsed
                 iterator.set_postfix({"Iteration": i + 1})
-                i += 1
+                i += 1  # noqa: PLW2901
             logdict = {"total_training_time": training_time}
             wandb.log(logdict)
         torch.save(model.state_dict(), first_layer_name)
     joblib.dump(training_time, os.path.join(savepath, "elapsed.joblib"))
 
     # Second layer
-    second_layer_name = f"{savepath}/models/{model_name}_{dataset_name}{'_augmented' if not augment else ''}{'_ratio_' + str(ratio) if ratio < 1.0 else ''}_second_layer.pth"
+    second_layer_name = f"{savepath}/models/{model_name}_{dataset_name}{'_augmented' if not augment else ''}"
+    second_layer_name += f"{'_ratio_' + str(ratio) if ratio < 1.0 else ''}_second_layer.pth"
     if os.path.isfile(second_layer_name):
         print("Loading second layer model")
         model.load_state_dict(torch.load(second_layer_name), strict=False)
@@ -169,10 +177,14 @@ def run_training_stdp(
         for epoch in iterator:
             i = 0
             iterator_epoch = tqdm(
-                train_loader, desc=f"Epoch {epoch}", position=1, leave=False, disable=True
+                train_loader,
+                desc=f"Epoch {epoch}",
+                position=1,
+                leave=False,
+                disable=True,
             )
             for data, _ in iterator_epoch:
-                data = data.to(device)
+                data = data.to(device)  # noqa: PLW2901
                 start_time = time.time()
                 model.train_unsupervised(data, layer_idx=2)
                 elapsed = time.time() - start_time
@@ -185,7 +197,8 @@ def run_training_stdp(
     joblib.dump(training_time, os.path.join(savepath, "elapsed.joblib"))
 
     # Third layer
-    third_layer_name = f"{savepath}/models/{model_name}_{dataset_name}{'_augmented' if not augment else ''}{'_ratio_' + str(ratio) if ratio < 1.0 else ''}_third_layer.pth"
+    third_layer_name = f"{savepath}/models/{model_name}_{dataset_name}{'_augmented' if not augment else ''}"
+    third_layer_name += f"{'_ratio_' + str(ratio) if ratio < 1.0 else ''}_third_layer.pth"
     if os.path.isfile(third_layer_name):
         print("Loading third layer model")
         model.load_state_dict(torch.load(third_layer_name), strict=False)
@@ -195,10 +208,14 @@ def run_training_stdp(
         for epoch in iterator:
             i = 0
             iterator_epoch = tqdm(
-                train_loader, desc=f"Epoch {epoch}", position=1, leave=False, disable=True
+                train_loader,
+                desc=f"Epoch {epoch}",
+                position=1,
+                leave=False,
+                disable=True,
             )
             for data, _ in iterator_epoch:
-                data = data.to(device)
+                data = data.to(device)  # noqa: PLW2901
                 start_time = time.time()
                 model.train_unsupervised(data, layer_idx=3)
                 elapsed = time.time() - start_time
@@ -212,22 +229,25 @@ def run_training_stdp(
 
     if model_name == "deepersnn":
         # Fourth layer
-        fourth_layer_name = f"{savepath}/models/{model_name}_{dataset_name}{'_augmented' if not augment else ''}{'_ratio_' + str(ratio) if ratio < 1.0 else ''}_fourth_layer.pth"
+        fourth_layer_name = f"{savepath}/models/{model_name}_{dataset_name}{'_augmented' if not augment else ''}"
+        fourth_layer_name += f"{'_ratio_' + str(ratio) if ratio < 1.0 else ''}_fourth_layer.pth"
         if os.path.isfile(fourth_layer_name):
             print("Loading fourth layer model")
             model.load_state_dict(torch.load(fourth_layer_name), strict=False)
         else:
             print("Training Fourth Layer")
-            iterator = tqdm(
-                range(epochs[3]), desc="Training Fourth Layer", disable=True
-            )
+            iterator = tqdm(range(epochs[3]), desc="Training Fourth Layer", disable=True)
             for epoch in iterator:
                 i = 0
                 iterator_epoch = tqdm(
-                    train_loader, desc=f"Epoch {epoch}", position=1, leave=False, disable=True
+                    train_loader,
+                    desc=f"Epoch {epoch}",
+                    position=1,
+                    leave=False,
+                    disable=True,
                 )
                 for data, _ in iterator_epoch:
-                    data = data.to(device)
+                    data = data.to(device)  # noqa: PLW2901
                     start_time = time.time()
                     model.train_unsupervised(data, layer_idx=4)
                     elapsed = time.time() - start_time
@@ -258,7 +278,8 @@ def run_training_stdp(
     best_train = np.array([0.0, 0.0, 0.0, 0.0])  # correct, total, loss, epoch
     best_test = np.array([0.0, 0.0, 0.0, 0.0])  # correct, total, loss, epoch
 
-    iterator = tqdm(range(final_epochs), desc="Training R STDP Layer", disable=True)
+    iterator = tqdm(range(final_epochs), desc="Training R STDP Layer", disable=False)
+    print("Training R-STDP Layer")
     for epoch in iterator:
         model.epoch = epoch
         perf_train = np.array([0.0, 0.0, 0.0])
@@ -267,7 +288,11 @@ def run_training_stdp(
         total_samples_train = 0
         i = 0
         iterator_epoch = tqdm(
-            train_loader, desc=f"Training epoch {epoch}", position=1, leave=False, disable=True
+            train_loader,
+            desc=f"Training epoch {epoch}",
+            position=1,
+            leave=False,
+            disable=False,
         )
         for k, (data, targets) in enumerate(iterator_epoch):
             start_time = time.time()
@@ -324,8 +349,8 @@ def run_training_stdp(
         total_loss_test = 0
         total_samples_test = 0
         for data, targets in test_loader:
-            data = data.to(device)
-            targets = targets.to(device)
+            data = data.to(device)  # noqa: PLW2901
+            targets = targets.to(device)  # noqa: PLW2901
             perf_test = model.test(data, targets, layer_idx=max_layers)
             if best_test[0] <= perf_test[0]:
                 best_test = np.append(perf_test, epoch)
@@ -339,13 +364,9 @@ def run_training_stdp(
             total_samples_test += np.sum(perf_test)
 
         logdict = {"epoch": epoch + 1}
-        logdict.update(
-            {"train_micro_accuracy_top1": total_correct_train / total_samples_train}
-        )
+        logdict.update({"train_micro_accuracy_top1": total_correct_train / total_samples_train})
         logdict.update({"train_criterion": total_loss_train / total_samples_train})
-        logdict.update(
-            {"test_micro_accuracy_top1": total_correct_test / total_samples_test}
-        )
+        logdict.update({"test_micro_accuracy_top1": total_correct_test / total_samples_test})
         logdict.update({"test_criterion": total_loss_test / total_samples_test})
         logdict.update({"total_training_time": training_time})
         wandb.log(logdict)
@@ -357,14 +378,10 @@ def run_training_stdp(
     joblib.dump(training_time, os.path.join(savepath, "elapsed.joblib"))
 
     # Save training history
-    model.save_history(
-        file_path=f"{savepath}/models/{model_name}_{dataset_name}_history.csv"
-    )
+    model.save_history(file_path=f"{savepath}/models/{model_name}_{dataset_name}_history.csv")
 
     # Save activation maps
-    model.save_activation_maps(
-        file_path=f"{savepath}/models/{model_name}_{dataset_name}_activation_maps"
-    )
+    model.save_activation_maps(file_path=f"{savepath}/models/{model_name}_{dataset_name}_activation_maps")
 
 
 def get_args():
