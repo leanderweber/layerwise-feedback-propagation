@@ -163,6 +163,8 @@ exclude = [
     "site-packages",
     "venv",
     "*.ipynb",
+    "tests",
+    "experiment_utils",
 ]
 line-length = 120
 
