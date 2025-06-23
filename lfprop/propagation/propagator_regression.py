@@ -10,7 +10,8 @@ from .propagator_lxt import LFPEpsilon, ParameterizableComposite, RuleGenerator
 
 class LFPRegressionLastLayer(lrules.EpsilonRule):
     """
-    LFP Rule for Regression Last Layer
+    Custom LFP (Layer-wise Feedback Propagation) Epsilon Rule for the last layer in regression tasks.
+    This rule modifies the relevance propagation for the regression output layer.
     """
 
     def __init__(
@@ -19,10 +20,27 @@ class LFPRegressionLastLayer(lrules.EpsilonRule):
         epsilon=1e-6,
         inplace=True,
     ):
+        """
+        Initialize the LFPRegressionLastLayer.
+
+        Args:
+            module: The module (layer) to which this rule is applied.
+            epsilon (float): Stabilization term to avoid division by zero.
+            inplace (bool): Whether to perform operations in-place.
+        """
         super(LFPRegressionLastLayer, self).__init__(module, epsilon)
         self.inplace = inplace
 
     def forward(self, *inputs):
+        """
+        Forward pass for the custom regression last layer rule.
+
+        Args:
+            *inputs: Input tensors to the module.
+
+        Returns:
+            Output tensor after applying the custom rule.
+        """
         return lfp_regression_last_layer.apply(
             self.module,
             self.epsilon,
@@ -34,24 +52,38 @@ class LFPRegressionLastLayer(lrules.EpsilonRule):
 # TODO: This is not really working atm... The reference point chosen as target may not be good as well...
 class lfp_regression_last_layer(lrules.epsilon_lrp_fn):
     """
-    LFP Epsilon Rule for Regression Last Layer
+    Custom autograd Function implementing the LFP Epsilon Rule for the last layer in regression.
+    Handles both forward and backward passes for relevance propagation.
     """
 
     @staticmethod
     def forward(ctx, fn, epsilon, inplace, *inputs):
-        # create boolean mask for inputs requiring gradients
+        """
+        Forward pass for the custom regression last layer rule.
+
+        Args:
+            ctx: Context object for saving information for backward computation.
+            fn: The module (layer) function.
+            epsilon (float): Stabilization term.
+            inplace (bool): Whether to perform operations in-place.
+            *inputs: Input tensors.
+
+        Returns:
+            Output tensor detached from the computation graph.
+        """
+        # Track which inputs require gradients
         requires_grads = [True if inp.requires_grad else False for inp in inputs]
 
-        # detach inputs to avoid overwriting gradients if same input is used as multiple arguments
-        # (like in self-attention)
+        # Detach inputs to avoid overwriting gradients if same input is used multiple times
         inputs = tuple(inp.detach().requires_grad_() if inp.requires_grad else inp for inp in inputs)
 
-        # get parameters to store for backward. Here, we want to accumulate reward, so we do not detach
+        # Get parameters to store for backward (do not detach, as we want to accumulate reward)
         params = [param for _, param in fn.named_parameters(recurse=False) if param.requires_grad]
 
         with torch.enable_grad():
             outputs = fn(*inputs)
 
+        # Save context for backward
         (
             ctx.epsilon,
             ctx.requires_grads,
@@ -61,7 +93,7 @@ class lfp_regression_last_layer(lrules.epsilon_lrp_fn):
             requires_grads,
             inplace,
         )
-        # save only inputs requiring gradients
+        # Save only inputs requiring gradients
         inputs = tuple(inputs[i] for i in range(len(inputs)) if requires_grads[i])
         ctx.save_for_backward(*inputs, *params, outputs)
 
@@ -72,16 +104,26 @@ class lfp_regression_last_layer(lrules.epsilon_lrp_fn):
 
     @staticmethod
     def backward(ctx, *incoming_target):
+        """
+        Backward pass for custom relevance propagation.
+
+        Args:
+            ctx: Context object with saved tensors and parameters.
+            *incoming_target: Incoming target tensor(s) for relevance propagation.
+
+        Returns:
+            Tuple of gradients for each input to the forward function.
+        """
         outputs = ctx.saved_tensors[-1]
         inputs = ctx.saved_tensors[: ctx.n_inputs]
         params = ctx.saved_tensors[ctx.n_inputs : ctx.n_inputs + ctx.n_params]
 
-        # Assume we get the target, NOT the reward
+        # Compute incoming reward as L1 difference between target and output, scaled by sign
         incoming_reward = (incoming_target[0] - outputs) * torch.where(
             outputs.sign() == 0, 1.0, outputs.sign()
         )  # Compute L1 Reward
 
-        # We use the target in the denominator
+        # Normalize reward using stabilized denominator
         normed_reward = incoming_reward / zcore.stabilize(
             (outputs - incoming_target[0]),
             ctx.epsilon,
@@ -92,17 +134,16 @@ class lfp_regression_last_layer(lrules.epsilon_lrp_fn):
 
         z_target = incoming_target[0] * normed_reward
 
-        # compute param reward (used to update parameters)
+        # Compute parameter reward (used to update parameters)
         for param in params:
             if not isinstance(param, tuple):
-                param = (param,)  # noqa: PLW2901
-            param_grads_1 = torch.autograd.grad(
-                outputs, param, normed_reward, retain_graph=True
-            )  # a_i * 1/(o_c-y_c) * r_c
-            param_grads_2 = torch.autograd.grad(
-                outputs, param, z_target, retain_graph=True
-            )  # a_i * y_c/(o_c-y_c) * r_c
-            param_grads_3 = torch.autograd.grad(outputs, param, torch.ones_like(outputs), retain_graph=True)  # a_i
+                param = (param,)  # Noqa: PLW2901
+            # Compute gradients for different reward terms
+            param_grads_1 = torch.autograd.grad(outputs, param, normed_reward, retain_graph=True)
+            param_grads_2 = torch.autograd.grad(outputs, param, z_target, retain_graph=True)
+            param_grads_3 = torch.autograd.grad(outputs, param, torch.ones_like(outputs), retain_graph=True)
+
+            # Combine gradients to compute parameter reward
             param_reward = tuple(
                 param_grads_1[i] * param[i].abs()
                 - torch.where(
@@ -111,14 +152,10 @@ class lfp_regression_last_layer(lrules.epsilon_lrp_fn):
                     0.0,
                 )
                 for i in range(len(param))
-            )  # (|w_ic|*a_i - y_c)/(o_c-y_c) * r_c
+            )
 
+            # Debugging: print if NaNs are detected
             if torch.isnan(param_reward[0]).sum() > 0:
-                # print(incoming_target)
-                # print(outputs)
-                # print(incoming_reward)
-                # print(normed_reward)
-                # print(z_target)
                 print(param_grads_1)
                 print(param_grads_2)
                 print(param_grads_3)
@@ -130,18 +167,16 @@ class lfp_regression_last_layer(lrules.epsilon_lrp_fn):
                         0.0,
                     )
                 )
-                # print(param_reward)
                 exit
 
+            # Store feedback in parameter
             for i in range(len(param)):
                 param[i].feedback = param_reward[i]
 
-        # compute input reward (= outgoing reward to propagate)
-        input_grads_1 = torch.autograd.grad(
-            outputs, inputs, normed_reward, retain_graph=True
-        )  # w_ic * 1/(o_c-y_c) * r_c
-        input_grads_2 = torch.autograd.grad(outputs, inputs, z_target, retain_graph=True)  # w_ic * y_c/(o_c-y_c) * r_c
-        input_grads_3 = torch.autograd.grad(outputs, inputs, torch.ones_like(outputs), retain_graph=False)  # w_ic
+        # Compute input reward (outgoing reward to propagate)
+        input_grads_1 = torch.autograd.grad(outputs, inputs, normed_reward, retain_graph=True)
+        input_grads_2 = torch.autograd.grad(outputs, inputs, z_target, retain_graph=True)
+        input_grads_3 = torch.autograd.grad(outputs, inputs, torch.ones_like(outputs), retain_graph=False)
 
         outgoing_reward = tuple(
             (
@@ -155,14 +190,25 @@ class lfp_regression_last_layer(lrules.epsilon_lrp_fn):
                 else None
             )
             for i in range(len(ctx.requires_grads))
-        )  # (z_ic-y_c)/(o_c-y_c) * r_c
+        )
 
-        # return relevance at requires_grad indices else None
+        # Return None for non-tensor arguments, followed by outgoing rewards
         return (None, None, None) + outgoing_reward
 
 
 class LFPEpsilonRegressionComposite(ParameterizableComposite):
+    """
+    Composite rule for LFP Epsilon propagation in regression models.
+    Maps different layer types to their corresponding propagation rules.
+    """
+
     def __init__(self, epsilon=1e-6):
+        """
+        Initialize the composite rule with a mapping from layer types to rules.
+
+        Args:
+            epsilon (float): Stabilization term for all epsilon-based rules.
+        """
         layer_map = {
             "last": RuleGenerator(
                 LFPRegressionLastLayer,

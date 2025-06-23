@@ -12,7 +12,10 @@ from .propagator_lxt import ParameterizableComposite, RuleGenerator
 
 class LFPEpsilonSNN(lrules.EpsilonRule):
     """
-    LFP Epsilon Rule for SNN
+    LFP Epsilon Rule for Spiking Neural Networks (SNN).
+
+    This rule implements the epsilon-LRP (Layer-wise Relevance Propagation) for SNNs,
+    adapted for use with the LFP (Layer-wise Feedback Propagation) framework.
     """
 
     def __init__(
@@ -21,14 +24,31 @@ class LFPEpsilonSNN(lrules.EpsilonRule):
         epsilon=1e-6,
         inplace=True,
     ):
+        """
+        Initialize the LFPEpsilonSNN rule.
+
+        Args:
+            module: The module (layer) to which this rule is applied.
+            epsilon (float): Stabilizer for denominator to avoid division by zero.
+            inplace (bool): Whether to perform operations in-place.
+        """
         super(LFPEpsilonSNN, self).__init__(module, epsilon)
         self.inplace = inplace
 
-        # This is needed for compatibility with L631 in modeling_vit.py from transformers library
+        # For compatibility with certain modules (e.g., transformers' modeling_vit.py)
         if hasattr(module, "weight"):
             self.weight = module.weight
 
     def forward(self, *inputs):
+        """
+        Forward pass for the LFP epsilon rule.
+
+        Args:
+            *inputs: Input tensors to the module.
+
+        Returns:
+            Output(s) of the wrapped module, detached from the computation graph.
+        """
         return epsilon_lfp_snn_fn.apply(
             self.module,
             self.epsilon,
@@ -39,51 +59,62 @@ class LFPEpsilonSNN(lrules.EpsilonRule):
 
 class epsilon_lfp_snn_fn(lrules.epsilon_lrp_fn):
     """
-    LFP Epsilon Rule for SNN
-    Makes some assumption about the wrapped module "fn",
-    e.g., that it is of type "SpikingLayer"
+    Custom autograd function for LFP Epsilon Rule in SNNs.
 
-    Note: This function assumes mostly default parameter from snn.Leaky
-    (cf. parameters defined in lfprop.model.spiking_networks)
+    This function handles both the forward and backward passes for relevance propagation
+    through spiking layers, making assumptions about the wrapped module (e.g., SpikingLayer).
     """
 
     @staticmethod
     def forward(ctx, fn: SpikingLayer, epsilon, inplace, *inputs):
+        """
+        Forward pass for the LFP epsilon rule.
+
+        Args:
+            ctx: Context object for saving information for backward computation.
+            fn (SpikingLayer): The spiking layer module.
+            epsilon (float): Stabilizer for denominator.
+            inplace (bool): Whether to perform operations in-place.
+            *inputs: Input tensors.
+
+        Returns:
+            Output(s) of the spiking layer, detached from the computation graph.
+        """
         assert isinstance(fn, SpikingLayer)
 
-        # create boolean mask for inputs requiring gradients
+        # Track which inputs require gradients
         requires_grads = [True if inp.requires_grad else False for inp in inputs]
 
-        # detach inputs to avoid overwriting gradients if same input is used as multiple arguments
-        # (like in self-attention)
+        # Detach inputs to avoid overwriting gradients if reused
         inputs = tuple(inp.detach().requires_grad_() if inp.requires_grad else inp for inp in inputs)
 
-        # get parameters to store for backward. Here, we want to accumulate reward, so we do not detach
+        # Gather parameters that require gradients
         params = [param for _, param in fn.parameterized_layer.named_parameters(recurse=True) if param.requires_grad]
-        # Reset feedback:
+
+        # Reset feedback and internal reward attributes
         for param in params:
             if hasattr(param, "feedback"):
                 del param.feedback
-        # Reset Internal Reward
         if hasattr(fn, "internal_reward"):
             del fn.internal_reward
 
-        # get U_[t] to store for backward
+        # Store membrane potential before forward pass
         fn.spike_mechanism.mem = fn.spike_mechanism.mem.detach().requires_grad_()
         u_t = fn.spike_mechanism.mem
 
         with torch.enable_grad():
-            outputs = fn(*inputs)  # Note: this can be either spikes, or (spikes, mem)
+            outputs = fn(*inputs)  # Forward pass through the spiking layer
 
-        # get U_[t+1] to store for backward
+        # Store membrane potential after forward pass
         u_tnew = fn.spike_mechanism.mem
 
-        # Get reverse reset matrix
+        # Compute reverse reset matrix based on reset mechanism
         if fn.spike_mechanism.reset_mechanism_val == 0:  # reset by subtraction
             reverse_reset = fn.spike_mechanism.reset * fn.spike_mechanism.threshold
         elif fn.spike_mechanism.reset_mechanism_val == 1:  # reset to zero
             raise NotImplementedError()
 
+        # Save context for backward
         (
             ctx.epsilon,
             ctx.requires_grads,
@@ -94,11 +125,9 @@ class epsilon_lfp_snn_fn(lrules.epsilon_lrp_fn):
             inplace,
         )
 
-        # save only inputs requiring gradients
+        # Save only inputs requiring gradients
         inputs = tuple(inputs[i] for i in range(len(inputs)) if requires_grads[i])
-        ctx.save_for_backward(
-            *inputs, *params, u_t, u_tnew, reverse_reset
-        )  # u_tnew is stored in place of outputs, compared to ann version of LFP
+        ctx.save_for_backward(*inputs, *params, u_t, u_tnew, reverse_reset)
 
         ctx.n_inputs, ctx.n_params = (
             len(inputs),
@@ -106,56 +135,58 @@ class epsilon_lfp_snn_fn(lrules.epsilon_lrp_fn):
         )
         ctx.fn = fn
 
+        # Return outputs, detached from computation graph
         if isinstance(outputs, tuple):
-            # if layer is not hidden
             return outputs[0].detach(), outputs[1].detach()
         else:
             return outputs.detach()
 
     @staticmethod
     def backward(ctx, *incoming_reward):
-        # Handle incoming reward being for spikes and mem or just for spikes
-        valid_incoming_rewards = [  # TODO check these
-            in_reward for in_reward in incoming_reward if in_reward is not None
-        ]
-        # Aggregate rewards via sum. may use something else in future
+        """
+        Backward pass for the LFP epsilon rule.
+
+        Args:
+            ctx: Context object with saved tensors and attributes.
+            *incoming_reward: Incoming relevance/reward tensors.
+
+        Returns:
+            Tuple of gradients for each input to the forward function.
+        """
+        # Filter out None rewards and aggregate
+        valid_incoming_rewards = [in_reward for in_reward in incoming_reward if in_reward is not None]
         aggregated_incoming_reward = torch.stack(valid_incoming_rewards).sum(dim=0)
 
-        # Add the old internal reward (i.e., r_[u_tnew->ut])
+        # Add any stored internal reward
         if hasattr(ctx.fn, "internal_reward"):
             for in_reward in ctx.fn.internal_reward:
                 aggregated_incoming_reward += in_reward
 
-        # Get stored tensors
+        # Retrieve saved tensors
         inputs = ctx.saved_tensors[: ctx.n_inputs]
         params = ctx.saved_tensors[ctx.n_inputs : ctx.n_inputs + ctx.n_params]
-        u_t = ctx.saved_tensors[-3]  # Assume there is only one u_t
-        u_tnew = ctx.saved_tensors[-2]  # Assume there is only one u_tnew
-        reverse_reset = ctx.saved_tensors[-1]  # Assume there is only one reverse_reset
+        u_t = ctx.saved_tensors[-3]
+        u_tnew = ctx.saved_tensors[-2]
+        reverse_reset = ctx.saved_tensors[-1]
 
+        # Compute difference in membrane potential, correcting for reset
         if u_t.shape == u_tnew.shape:
-            u_diff = (
-                u_tnew + reverse_reset - u_t
-            ).abs()  # Correct u_tnew by reverse reset. We are interested in pre-activation that
-            # CAUSED the spike
-            # u_diff is basically abs(W.T*X)
-            denom = u_t.abs() + u_diff  # Basically u_tnew, assuming all contributions are positive only
+            u_diff = (u_tnew + reverse_reset - u_t).abs()
+            denom = u_t.abs() + u_diff
         else:
             u_diff = (u_tnew + reverse_reset).abs()
             denom = u_diff
 
+        # Normalize reward by stabilized denominator
         normed_reward = aggregated_incoming_reward / zcore.stabilize(
             denom, ctx.epsilon, clip=False, norm_scale=False, dim=None
-        )  # *u_tnew.sign() #TODO: sign worsens performance. investigate why.
+        )
 
-        # compute param reward (used to update parameters)
+        # Compute parameter reward (feedback for parameters)
         for param in params:
             if not isinstance(param, tuple):
-                param = (param,)  # noqa: PLW2901
-            param_grads = torch.autograd.grad(
-                (u_tnew,), param, normed_reward, retain_graph=True
-            )  # a_i * r_j/(z_j+eps).
-            # Note: we can use u_tnew here as we only use it for getting a_i in the correct shape.
+                param = (param,)  # Noqa: PLW2901
+            param_grads = torch.autograd.grad((u_tnew,), param, normed_reward, retain_graph=True)
             if ctx.inplace:
                 param_reward = tuple(param_grads[i].mul_(param[i].abs()) for i in range(len(param)))
             else:
@@ -166,23 +197,18 @@ class epsilon_lfp_snn_fn(lrules.epsilon_lrp_fn):
                 else:
                     param[i].feedback += param_reward[i]
 
-        # In the first foward pass, snntorch initializes u_t.
-        # We cannot pass reward since the u_t before that is not used in the graph
+        # Compute internal reward for membrane potential if applicable
         if u_t.shape == u_tnew.shape:
-            # compute U[t] Reward
             ut_grads = torch.autograd.grad((u_tnew,), (u_t,), normed_reward, retain_graph=True)
-
             if ctx.inplace:
                 internal_reward = ((ut_grads[0].mul_(u_t) if u_t.requires_grad else None),)
             else:
                 internal_reward = tuple(
                     (ut_grads[0] * u_t if u_t.requires_grad else None),
                 )
-
-            # Store U[t] reward. TODO find nicer implementation for this?
             ctx.fn.internal_reward = internal_reward
 
-        # compute input reward (= outgoing reward to propagate)
+        # Compute outgoing reward for inputs
         input_grads = torch.autograd.grad((u_tnew,), inputs, normed_reward, retain_graph=False)
 
         if ctx.inplace:
@@ -195,7 +221,7 @@ class epsilon_lfp_snn_fn(lrules.epsilon_lrp_fn):
                 input_grads[i] * inputs[i] if ctx.requires_grads[i] else None for i in range(len(ctx.requires_grads))
             )
 
-        # return relevance at requires_grad indices else None
+        # Return None for non-tensor arguments, followed by outgoing rewards
         return (
             None,
             None,
@@ -204,18 +230,24 @@ class epsilon_lfp_snn_fn(lrules.epsilon_lrp_fn):
 
 
 class LFPSNNEpsilonComposite(ParameterizableComposite):
+    """
+    Composite rule for applying the LFP Epsilon Rule to SNN layers.
+
+    This composite maps SpikingLayer modules to the LFPEpsilonSNN rule.
+    """
+
     def __init__(self, epsilon=1e-6):
+        """
+        Initialize the composite rule.
+
+        Args:
+            epsilon (float): Stabilizer for denominator in epsilon rule.
+        """
         layer_map = {
-            # ztypes.Activation: lrules.IdentityRule,
-            # activations.Step: lrules.IdentityRule,
-            # ztypes.Activation: lrules.IdentityRule,
-            # activations.Step: lrules.IdentityRule,
             SpikingLayer: RuleGenerator(
                 LFPEpsilonSNN,
                 epsilon=epsilon,
             ),
-            # snn.SpikingNeuron: lrules.StopRelevanceRule,
-            # ztypes.Linear: RuleGenerator(LFPEpsilon,epsilon=epsilon,),
         }
 
         super().__init__(layer_map=layer_map)

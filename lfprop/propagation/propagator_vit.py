@@ -80,6 +80,18 @@ class div2_fn(lfunctional.Function):
 
     @staticmethod
     def forward(ctx, input_a, input_b, inplace=False):
+        """
+        Forward pass for elementwise division.
+
+        Args:
+            ctx: Context object for storing information for backward computation.
+            input_a (torch.Tensor): Numerator tensor.
+            input_b (torch.Tensor): Denominator tensor.
+            inplace (bool): Whether to perform the operation in-place.
+
+        Returns:
+            torch.Tensor: Result of elementwise division.
+        """
         ctx.requires_grads = [
             i for i, inp in enumerate((input_a, input_b)) if isinstance(inp, torch.Tensor) and inp.requires_grad
         ]
@@ -90,6 +102,16 @@ class div2_fn(lfunctional.Function):
     @staticmethod
     @lfunctional.conservation_check_wrap
     def backward(ctx, *out_relevance):
+        """
+        Backward pass for relevance propagation through division.
+
+        Args:
+            ctx: Context object with information from forward pass.
+            out_relevance: Relevance at the output.
+
+        Returns:
+            tuple: Relevance for each input and None for inplace argument.
+        """
         n_required = len(ctx.requires_grads)
 
         if ctx.inplace:
@@ -97,12 +119,17 @@ class div2_fn(lfunctional.Function):
         else:
             out_relevance = out_relevance[0] / n_required
 
-        # only return relevance at requires_grad indices else None
+        # Only return relevance at requires_grad indices, else None
         return tuple(out_relevance if i in ctx.requires_grads else None for i in range(2)) + (None,)
 
 
 class TransformersActivation(metaclass=ztypes.SubclassMeta):
-    """Abstract base class that describes activation modules defined in transformers package."""
+    """
+    Abstract base class that describes activation modules defined in the transformers package.
+
+    This class is used to group together all activation functions from the transformers library
+    for rule assignment in relevance propagation.
+    """
 
     __subclass__ = (
         PytorchGELUTanh,
@@ -120,7 +147,20 @@ class TransformersActivation(metaclass=ztypes.SubclassMeta):
 
 
 class LFPEpsilonComposite(ParameterizableComposite):
+    """
+    Composite rule class for Layer-wise Feedback Propagation (LFP) with epsilon stabilization.
+
+    This class maps different layer types and operations to their corresponding LFP rules,
+    enabling flexible and parameterizable relevance propagation through ViT models.
+
+    Args:
+        norm_backward (bool): Whether to use normalization in backward pass (unused here).
+        epsilon (float): Stabilization parameter for epsilon-LRP rules.
+    """
+
     def __init__(self, norm_backward=False, epsilon=1):
+        # Mapping from layer/operator types to their corresponding LFP rules
+        # Note: ORDER MATTERS!
         layer_map = {
             ztypes.Activation: lrules.IdentityRule,
             TransformersActivation: lrules.IdentityRule,

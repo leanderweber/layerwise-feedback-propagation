@@ -15,6 +15,7 @@ from .activations import Step
 
 # Model definitions
 
+# Mapping of spike gradient names to their corresponding surrogate gradient functions
 SPIKE_GRAD_MAP = {
     "step": Step,
     "atan": snn.surrogate.atan,
@@ -23,6 +24,15 @@ SPIKE_GRAD_MAP = {
 
 
 class NoisyWrapper(tnn.Module):
+    """
+    Module wrapper that adds Gaussian noise to its input during training.
+
+    Args:
+        module (nn.Module): The wrapped module.
+        noise_size (float): Standard deviation of the Gaussian noise.
+        apply_noise (bool): Whether to apply noise during training.
+    """
+
     def __init__(self, module, noise_size, apply_noise, *args, **kwargs):
         super().__init__()
 
@@ -32,7 +42,9 @@ class NoisyWrapper(tnn.Module):
         self.zeros_ratio = 0
 
     def forward(self, x):
+        # Track the ratio of zeros in the input
         self.zeros_ratio = ((x == 0).sum() / x.numel()).item()
+        # Add noise if in training mode and apply_noise is True
         if self.training and self.apply_noise:
             noise = torch.randn_like(x) * self.noise_size
             x = x + noise
@@ -41,6 +53,14 @@ class NoisyWrapper(tnn.Module):
 
 
 class Interpolate(tnn.Module):
+    """
+    Module for resizing tensors using interpolation.
+
+    Args:
+        size (tuple): Output spatial size.
+        mode (str): Interpolation mode.
+    """
+
     def __init__(self, size, mode="bilinear", *args, **kwargs):
         super().__init__()
 
@@ -48,6 +68,7 @@ class Interpolate(tnn.Module):
         self.mode = mode
 
     def forward(self, x):
+        # Resize input tensor
         x = tnn.functional.interpolate(
             x,
             size=self.size,
@@ -59,7 +80,11 @@ class Interpolate(tnn.Module):
 
 class SpikingLayer(tnn.Module):
     """
-    Wrapper for parameterized layer (e.g., Linear, Conv) + a Spiking Mechanism (e.g., LIF)
+    Wrapper for a parameterized layer (e.g., Linear, Conv) and a spiking neuron mechanism.
+
+    Args:
+        parameterized_layer (nn.Module): The linear or convolutional layer.
+        spike_mechanism (snn.SpikingNeuron): The spiking neuron mechanism.
     """
 
     def __init__(self, parameterized_layer: tnn.Module, spike_mechanism: snn.SpikingNeuron):
@@ -69,6 +94,7 @@ class SpikingLayer(tnn.Module):
         self.spike_mechanism = spike_mechanism
 
     def forward(self, x):
+        # Forward through the parameterized layer, then the spiking mechanism
         x = self.parameterized_layer(x)
         x = self.spike_mechanism(x)
 
@@ -77,7 +103,17 @@ class SpikingLayer(tnn.Module):
 
 class LifMLP(tnn.Module):
     """
-    Simple MLP using Leaky-Integrate-And-Fire Neurons
+    Multi-layer perceptron using Leaky-Integrate-and-Fire (LIF) neurons.
+
+    Args:
+        n_channels (int): Number of input features.
+        n_outputs (int): Number of output classes.
+        beta (float): LIF neuron decay parameter.
+        surrogate_disable (bool): Disable surrogate gradient.
+        spike_grad (str or callable): Surrogate gradient function.
+        noise_size (float): Noise standard deviation.
+        apply_noise (bool): Whether to apply noise.
+        reset_delay (bool): Whether to use reset delay in LIF neurons.
     """
 
     def __init__(
@@ -96,8 +132,9 @@ class LifMLP(tnn.Module):
 
         self.apply_noise = apply_noise
         self.noise_size = noise_size
+        kwargs.pop("n_linear_inputs", None)  # Remove n_linear_inputs if present
 
-        # Classifier
+        # Classifier: 3-layer MLP with LIF neurons
         self.classifier = tnn.Sequential(
             SpikingLayer(
                 NoisyWrapper(tnn.Linear(n_channels, 1000), self.noise_size, self.apply_noise),
@@ -137,22 +174,32 @@ class LifMLP(tnn.Module):
         self.reset()
 
     def reset(self):
+        """
+        Reset and detach hidden states of all LIF neurons.
+        """
         snn.Leaky.reset_hidden()
         snn.Leaky.detach_hidden()
 
     def forward(self, x):
         """
-        Forwards input through network
-        """
+        Forward input through the MLP.
 
+        Args:
+            x (Tensor): Input tensor.
+
+        Returns:
+            Tensor: Output tensor.
+        """
         x = torch.flatten(x, 1)
         x = self.classifier(x)
-
-        # Return output
         return x
 
 
 class SmallLifMLP(LifMLP):
+    """
+    Smaller MLP using LIF neurons (2 layers).
+    """
+
     def __init__(
         self,
         n_channels,
@@ -176,8 +223,9 @@ class SmallLifMLP(LifMLP):
             apply_noise=apply_noise,
             **kwargs,
         )
+        kwargs.pop("n_linear_inputs", None)  # Remove n_linear_inputs if present
 
-        # Classifier
+        # Classifier: 2-layer MLP with LIF neurons
         self.classifier = tnn.Sequential(
             SpikingLayer(
                 NoisyWrapper(tnn.Linear(n_channels, 1000), self.noise_size, self.apply_noise),
@@ -206,7 +254,17 @@ class SmallLifMLP(LifMLP):
 
 class LifCNN(LifMLP):
     """
-    Simple CNN using Leaky-Integrate-And-Fire Neurons
+    Simple convolutional neural network using LIF neurons.
+
+    Args:
+        n_channels (int): Number of input channels.
+        n_outputs (int): Number of output classes.
+        beta (float): LIF neuron decay parameter.
+        surrogate_disable (bool): Disable surrogate gradient.
+        spike_grad (str or callable): Surrogate gradient function.
+        noise_size (float): Noise standard deviation.
+        apply_noise (bool): Whether to apply noise.
+        reset_delay (bool): Whether to use reset delay in LIF neurons.
     """
 
     def __init__(
@@ -231,8 +289,9 @@ class LifCNN(LifMLP):
             noise_size=noise_size,
             apply_noise=apply_noise,
         )
+        kwargs.pop("n_linear_inputs", None)  # Remove n_linear_inputs if present
 
-        # Classifier
+        # Classifier: 2 conv layers + 1 linear layer, all with LIF neurons
         self.classifier = tnn.Sequential(
             SpikingLayer(
                 NoisyWrapper(tnn.Conv2d(n_channels, 12, 5), self.noise_size, self.apply_noise),
@@ -278,19 +337,28 @@ class LifCNN(LifMLP):
 
     def forward(self, x):
         """
-        Forwards input through network
+        Forward input through the CNN.
+
+        Args:
+            x (Tensor): Input tensor.
+
+        Returns:
+            Tensor: Output tensor.
         """
-
         x = self.classifier(x)
-
-        # Return output
         return x
 
 
 class DeeperSNN(LifCNN):
     """
-    Deeper SNN with more layers
+    Deeper SNN with more convolutional layers.
     Similar to Deeper2024 from https://github.com/aidinattar/snn
+
+    Args:
+        n_channels (int): Number of input channels.
+        n_outputs (int): Number of output classes.
+        beta (float): LIF neuron decay parameter.
+        n_linear_inputs (int): Number of inputs to the final linear layer.
     """
 
     def __init__(
@@ -319,7 +387,7 @@ class DeeperSNN(LifCNN):
 
         self.n_linear_inputs = n_linear_inputs
 
-        # Classifier
+        # Classifier: 5 conv layers + 1 linear layer, all with LIF neurons
         self.classifier = tnn.Sequential(
             SpikingLayer(
                 NoisyWrapper(
@@ -421,8 +489,14 @@ class DeeperSNN(LifCNN):
 
 class ResNet(LifCNN):
     """
-    ResNet-like architecture using Leaky-Integrate-And-Fire Neurons
+    ResNet-like architecture using LIF neurons.
     Similar to ResSNN from https://github.com/aidinattar/snn
+
+    Args:
+        n_channels (int): Number of input channels.
+        n_outputs (int): Number of output classes.
+        beta (float): LIF neuron decay parameter.
+        n_linear_inputs (int): Number of inputs to the final linear layer.
     """
 
     def __init__(
@@ -451,9 +525,10 @@ class ResNet(LifCNN):
 
         self.n_linear_inputs = n_linear_inputs
 
-        # Ehhhhh... :/
-        del self.classifier  # Remove the default classifier
+        # Remove the default classifier from LifCNN
+        del self.classifier
 
+        # Define ResNet-like blocks with skip connection
         self.block1 = SpikingLayer(
             NoisyWrapper(
                 tnn.Conv2d(n_channels, 30, 5, padding=2, bias=False),
@@ -517,6 +592,7 @@ class ResNet(LifCNN):
                 **kwargs,
             ),
         )
+        # Skip connection from block2 to block3
         self.skip_connection = SpikingLayer(
             tnn.Sequential(
                 NoisyWrapper(
@@ -554,20 +630,24 @@ class ResNet(LifCNN):
 
     def forward(self, x):
         """
-        Forwards input through network
-        """
+        Forward input through the ResNet-like SNN.
 
+        Args:
+            x (Tensor): Input tensor.
+
+        Returns:
+            Tensor: Output tensor.
+        """
         x = self.block1(x)
         x = self.pool1(x)
         x = self.block2(x)
         x = self.pool2(x)
         x_skip = self.skip_connection(x)
         x = self.block3(x)
+        # Residual connection: element-wise max
         x = torch.max(x, x_skip).float()
         x = self.pool3(x)
         x = self.block4(x)
         x = self.flatten(x)
         x = self.fc(x)
-
-        # Return output
         return x

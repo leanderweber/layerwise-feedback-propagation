@@ -3,12 +3,6 @@
 
 # Cluster Stuff
 cluster_run/
-configs/vit-training/
-configs/snn-training/
-
-# Some Notebooks
-nbs/plot-vit-results.ipynb
-nbs/plot-snn-results.ipynb
 
 # jupyter notebook checkpoints
 .ipynb_checkpoints
@@ -43,6 +37,9 @@ build/
 
 # tutorials
 minimal-example-data/
+minimal-example-signchanging-act-data/
+minimal-example-vit-data/
+tmp/
 
 # pyCharm project files
 .idea
