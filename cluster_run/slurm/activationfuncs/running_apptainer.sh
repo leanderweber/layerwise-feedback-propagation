@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=""
+#SBATCH --mail-user=leander.weber@hhi.fraunhofer.de
 #SBATCH --job-name=lfp-transfer
 #SBATCH --output=lfp-transfer-%j.out
 #SBATCH --nodes=1
@@ -10,14 +10,13 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
 
-TOKEN='<git access token>'
-USER_URL="<git user url>"
-REPO_NAME="<repo name>"
-BRANCH_NAME="<branch name>"
+TOKEN='TBD'
+USER_URL="vigitlab.fe.hhi.de/lweber/"
+REPO_NAME="reward-backprop"
+BRANCH_NAME="resubmission-1"
+DATA_SOURCE_DIR="/home/fe/lweber"
 
-DATA_SOURCE_DIR="<directory where cifar datasets are stored>"
-RESULT_STORAGE_DIR="<directory where results should be stored>"
-
+RESULT_STORAGE_DIR="/data/cluster/users/lweber/reward-backprop/activationfuncs/"
 mkdir -p $RESULT_STORAGE_DIR
 
 source "/etc/slurm/local_job_dir.sh"
@@ -39,11 +38,12 @@ echo $fname_config
 echo "Start Training"
 apptainer run --nv \
               --bind ${LOCAL_JOB_DIR}:/mnt \
-              --bind <isic dataset path>:/mnt/data/isic \
-              --bind <cub dataset path>:/mnt/data/cub \
-              --bind <food11 dataset path>:/mnt/data/food11 \
-              --bind <imagenet dataset path>:/mnt/data/imagenet \
-              ../../singularity/image_mini.sif bash /mnt/layer-wise-feedback-propagation/cluster_run/slurm/activationfuncs/run.sh $fname_config
+              --bind /data/datapool/datasets/adience:/mnt/data/adience \
+              --bind /data/datapool/datasets/ISIC2019:/mnt/data/isic \
+              --bind /data/datapool3/datasets/cub_attributes/CUB_200_2011:/mnt/data/cub \
+              --bind /data/datapool/datasets/food-11:/mnt/data/food11 \
+              --bind /data/datapool/datasets/ImageNet-complete:/mnt/data/imagenet \
+              ../../singularity/image_mini.sif bash /mnt/reward-backprop/cluster_run/slurm/activationfuncs/run.sh $fname_config
 echo "Training finished"
 
 echo "Copying results"

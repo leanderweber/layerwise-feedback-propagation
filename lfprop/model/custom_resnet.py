@@ -36,6 +36,11 @@ __all__ = [
 ]
 
 
+# torchvision-like resnet implementation that replaces the
+# implicit addition in the residual blocks with an explicit sum operation.
+# Note: This may be deprecated, with LXT backend now supporting operators as well.
+
+
 class Sum(nn.Module):
     def __init__(self):
         super(Sum, self).__init__()

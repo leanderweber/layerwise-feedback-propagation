@@ -1,6 +1,9 @@
 # Wandb
 /wandb/
 
+# Cluster Stuff
+cluster_run/
+
 # jupyter notebook checkpoints
 .ipynb_checkpoints
 
@@ -34,6 +37,9 @@ build/
 
 # tutorials
 minimal-example-data/
+minimal-example-signchanging-act-data/
+minimal-example-vit-data/
+tmp/
 
 # pyCharm project files
 .idea

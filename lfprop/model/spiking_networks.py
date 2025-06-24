@@ -1,6 +1,5 @@
 try:
     import snntorch as snn
-    from snntorch import utils as snnutils
 except ImportError:
     print(
         "The SNN functionality of this package requires extra dependencies ",
@@ -12,439 +11,643 @@ except ImportError:
 import torch
 from torch import nn as tnn
 
+from .activations import Step
+
 # Model definitions
 
-
-class CustomLeaky(snn.Leaky):
-    def __init__(self, *args, **kwargs):
-        self.minmem = kwargs.pop("minmem", None)
-        super().__init__(*args, **kwargs)
-        self.fire = self.custom_fire
-        self.mem_reset = self.custom_mem_reset
-
-    def custom_fire(self, mem):
-        """Generates spike if mem > threshold.
-        Returns spk."""
-
-        if self.state_quant:
-            mem = self.state_quant(mem)
-
-        spk = (mem > self.threshold).float()
-
-        return spk
-
-    def custom_mem_reset(self, mem):
-        """Generates detached reset signal if mem > threshold.
-        Returns reset."""
-        reset = (mem > self.threshold).float()
-
-        return reset
-
-    def forward(self, input_, mem=None):
-        """
-        Clips mem if desired
-        """
-        if self.minmem is None:
-            return super().forward(input_, mem)
-        else:
-            if not self.init_hidden:
-                spk, mem = super().forward(input_, mem)
-                return spk, mem.clip(min=self.minmem)
-            else:
-                _ = super().forward(input_, mem)
-                self.mem = self.mem.clip(min=self.minmem)
-                if self.output:
-                    return self.spk, self.mem
-                else:
-                    return self.mem
+# Mapping of spike gradient names to their corresponding surrogate gradient functions
+SPIKE_GRAD_MAP = {
+    "step": Step,
+    "atan": snn.surrogate.atan,
+    "fast_sigmoid": snn.surrogate.fast_sigmoid,
+}
 
 
-class CustomMaxPool2d(tnn.MaxPool2d):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.return_indices = True
-        self.idx = None
-        self.input_shape = None
+class NoisyWrapper(tnn.Module):
+    """
+    Module wrapper that adds Gaussian noise to its input during training.
 
-    def forward(self, inp):
-        self.input_size = inp.size()
-        res, self.idx = super().forward(inp)
-        return res
+    Args:
+        module (nn.Module): The wrapped module.
+        noise_size (float): Standard deviation of the Gaussian noise.
+        apply_noise (bool): Whether to apply noise during training.
+    """
 
-    def backward_lfp(self, incoming_feedback):
-        outgoing_feedback = torch.nn.functional.max_unpool2d(
-            incoming_feedback,
-            indices=self.idx,
-            kernel_size=self.kernel_size,
-            stride=self.stride,
-            output_size=self.input_size,
+    def __init__(self, module, noise_size, apply_noise, *args, **kwargs):
+        super().__init__()
+
+        self.noise_size = noise_size
+        self.apply_noise = apply_noise
+        self.module = module
+        self.zeros_ratio = 0
+
+    def forward(self, x):
+        # Track the ratio of zeros in the input
+        self.zeros_ratio = ((x == 0).sum() / x.numel()).item()
+        # Add noise if in training mode and apply_noise is True
+        if self.training and self.apply_noise:
+            noise = torch.randn_like(x) * self.noise_size
+            x = x + noise
+
+        return self.module.forward(x)
+
+
+class Interpolate(tnn.Module):
+    """
+    Module for resizing tensors using interpolation.
+
+    Args:
+        size (tuple): Output spatial size.
+        mode (str): Interpolation mode.
+    """
+
+    def __init__(self, size, mode="bilinear", *args, **kwargs):
+        super().__init__()
+
+        self.size = size
+        self.mode = mode
+
+    def forward(self, x):
+        # Resize input tensor
+        x = tnn.functional.interpolate(
+            x,
+            size=self.size,
+            mode=self.mode,
         )
-        return outgoing_feedback
+
+        return x
+
+
+class SpikingLayer(tnn.Module):
+    """
+    Wrapper for a parameterized layer (e.g., Linear, Conv) and a spiking neuron mechanism.
+
+    Args:
+        parameterized_layer (nn.Module): The linear or convolutional layer.
+        spike_mechanism (snn.SpikingNeuron): The spiking neuron mechanism.
+    """
+
+    def __init__(self, parameterized_layer: tnn.Module, spike_mechanism: snn.SpikingNeuron):
+        super().__init__()
+
+        self.parameterized_layer = parameterized_layer
+        self.spike_mechanism = spike_mechanism
+
+    def forward(self, x):
+        # Forward through the parameterized layer, then the spiking mechanism
+        x = self.parameterized_layer(x)
+        x = self.spike_mechanism(x)
+
+        return x
 
 
 class LifMLP(tnn.Module):
     """
-    Simple MLP using Leaky-Integrate-And-Fire Neurons
+    Multi-layer perceptron using Leaky-Integrate-and-Fire (LIF) neurons.
+
+    Args:
+        n_channels (int): Number of input features.
+        n_outputs (int): Number of output classes.
+        beta (float): LIF neuron decay parameter.
+        surrogate_disable (bool): Disable surrogate gradient.
+        spike_grad (str or callable): Surrogate gradient function.
+        noise_size (float): Noise standard deviation.
+        apply_noise (bool): Whether to apply noise.
+        reset_delay (bool): Whether to use reset delay in LIF neurons.
     """
 
-    def __init__(self, n_channels, n_outputs, beta, minmem, **kwargs):
+    def __init__(
+        self,
+        n_channels,
+        n_outputs,
+        beta,
+        surrogate_disable=False,
+        spike_grad=snn.surrogate.atan,
+        noise_size=1e-6,
+        apply_noise=True,
+        reset_delay=True,
+        **kwargs,
+    ):
         super().__init__()
 
-        # Classifier
+        self.apply_noise = apply_noise
+        self.noise_size = noise_size
+        kwargs.pop("n_linear_inputs", None)  # Remove n_linear_inputs if present
+
+        # Classifier: 3-layer MLP with LIF neurons
         self.classifier = tnn.Sequential(
-            tnn.Linear(n_channels, 1000),
-            CustomLeaky(beta=beta, init_hidden=True, minmem=minmem, **kwargs),
-            tnn.Linear(1000, 1000),
-            CustomLeaky(beta=beta, init_hidden=True, minmem=minmem, **kwargs),
-            tnn.Linear(1000, n_outputs),
-            CustomLeaky(beta=beta, init_hidden=True, output=True, minmem=minmem),
+            SpikingLayer(
+                NoisyWrapper(tnn.Linear(n_channels, 1000), self.noise_size, self.apply_noise),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                    **kwargs,
+                ),
+            ),
+            SpikingLayer(
+                NoisyWrapper(tnn.Linear(1000, 1000), self.noise_size, self.apply_noise),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                    **kwargs,
+                ),
+            ),
+            SpikingLayer(
+                NoisyWrapper(tnn.Linear(1000, n_outputs), self.noise_size, self.apply_noise),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    output=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                ),
+            ),
         )
 
-        self.forward_handles = []
-
-    def register_forward_hooks(self):
-        """
-        Registers forward hooks to save necessary stuff
-        :return:
-        """
-        for layer in self.classifier.modules():
-            if not isinstance(layer, snn.SpikingNeuron):
-                self.forward_handles.append(layer.register_forward_pre_hook(save_input_hook))
-                self.forward_handles.append(layer.register_forward_hook(save_output_hook))
-
-    def remove_forward_hooks(self):
-        """
-        Removes forward hooks
-        :return:
-        """
-        # Remove forward hooks
-        for handle in self.forward_handles:
-            handle.remove()
-
-    def save_forward_states(self):
-        for layer in self.classifier.modules():
-            if isinstance(layer, snn.SpikingNeuron):
-                layer.stored_mem.append(layer.mem.detach())
-                layer.stored_reset.append(layer.reset.detach())
+        self.reset()
 
     def reset(self):
-        # Reset states and store initial states
-        for layer in self.classifier.modules():
-            if isinstance(layer, snn.SpikingNeuron):
-                layer.stored_mem = [0.0]
-                layer.stored_reset = []
-            else:
-                layer.stored_x = []
-                layer.stored_out = []
-
-        # SNN Reset. Careful with this: Needs to have sequential model passed as this functions does not seem to iterate
-        # through modules properly in all cases (e.g. do NOT pass self instead of self.classifier)
-        snnutils.reset(self.classifier)
+        """
+        Reset and detach hidden states of all LIF neurons.
+        """
+        snn.Leaky.reset_hidden()
+        snn.Leaky.detach_hidden()
 
     def forward(self, x):
         """
-        Forwards input through network
+        Forward input through the MLP.
+
+        Args:
+            x (Tensor): Input tensor.
+
+        Returns:
+            Tensor: Output tensor.
         """
-
-        if self.training:
-            self.register_forward_hooks()
-
         x = torch.flatten(x, 1)
         x = self.classifier(x)
-
-        if self.training:
-            self.save_forward_states()
-            self.remove_forward_hooks()
-
-        # Return output
         return x
 
 
 class SmallLifMLP(LifMLP):
-    def __init__(self, n_channels, n_outputs, beta, minmem, **kwargs):
-        super().__init__(n_channels, n_outputs, beta, minmem, **kwargs)
+    """
+    Smaller MLP using LIF neurons (2 layers).
+    """
 
-        # Classifier
+    def __init__(
+        self,
+        n_channels,
+        n_outputs,
+        beta,
+        surrogate_disable=False,
+        spike_grad=snn.surrogate.atan,
+        noise_size=1e-6,
+        apply_noise=True,
+        reset_delay=True,
+        **kwargs,
+    ):
+        super().__init__(
+            n_channels,
+            n_outputs,
+            beta,
+            surrogate_disable=surrogate_disable,
+            spike_grad=spike_grad,
+            reset_delay=reset_delay,
+            noise_size=noise_size,
+            apply_noise=apply_noise,
+            **kwargs,
+        )
+        kwargs.pop("n_linear_inputs", None)  # Remove n_linear_inputs if present
+
+        # Classifier: 2-layer MLP with LIF neurons
         self.classifier = tnn.Sequential(
-            tnn.Linear(n_channels, 1000),
-            CustomLeaky(beta=beta, init_hidden=True, minmem=minmem, **kwargs),
-            # tnn.Linear(1000, 1000),
-            # CustomLeaky(beta=beta, init_hidden=True, minmem=minmem, **kwargs),
-            tnn.Linear(1000, n_outputs),
-            CustomLeaky(beta=beta, init_hidden=True, output=True, minmem=minmem),
+            SpikingLayer(
+                NoisyWrapper(tnn.Linear(n_channels, 1000), self.noise_size, self.apply_noise),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                    **kwargs,
+                ),
+            ),
+            SpikingLayer(
+                NoisyWrapper(tnn.Linear(1000, n_outputs), self.noise_size, self.apply_noise),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    output=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                ),
+            ),
         )
 
 
 class LifCNN(LifMLP):
     """
-    Simple CNN using Leaky-Integrate-And-Fire Neurons
+    Simple convolutional neural network using LIF neurons.
+
+    Args:
+        n_channels (int): Number of input channels.
+        n_outputs (int): Number of output classes.
+        beta (float): LIF neuron decay parameter.
+        surrogate_disable (bool): Disable surrogate gradient.
+        spike_grad (str or callable): Surrogate gradient function.
+        noise_size (float): Noise standard deviation.
+        apply_noise (bool): Whether to apply noise.
+        reset_delay (bool): Whether to use reset delay in LIF neurons.
     """
 
-    def __init__(self, n_channels, n_outputs, beta, minmem, **kwargs):
-        super().__init__(n_channels, n_outputs, beta, minmem)
-
-        # Classifier
-        self.classifier = tnn.Sequential(
-            tnn.Conv2d(n_channels, 12, 5),
-            CustomMaxPool2d(2),
-            CustomLeaky(beta=beta, init_hidden=True, minmem=minmem, **kwargs),
-            tnn.Conv2d(12, 64, 5),
-            CustomMaxPool2d(2),
-            CustomLeaky(beta=beta, init_hidden=True, minmem=minmem, **kwargs),
-            tnn.Flatten(),
-            tnn.Linear(64 * 4 * 4, n_outputs),
-            CustomLeaky(beta=beta, init_hidden=True, output=True, minmem=minmem),
+    def __init__(
+        self,
+        n_channels,
+        n_outputs,
+        beta,
+        surrogate_disable=False,
+        spike_grad=snn.surrogate.atan,
+        noise_size=1e-6,
+        apply_noise=True,
+        reset_delay=True,
+        **kwargs,
+    ):
+        super().__init__(
+            n_channels,
+            n_outputs,
+            beta,
+            surrogate_disable=surrogate_disable,
+            spike_grad=spike_grad,
+            reset_delay=reset_delay,
+            noise_size=noise_size,
+            apply_noise=apply_noise,
         )
+        kwargs.pop("n_linear_inputs", None)  # Remove n_linear_inputs if present
 
-    def forward(self, x):
-        """
-        Forwards input through network
-        """
-
-        if self.training:
-            self.register_forward_hooks()
-
-        x = self.classifier(x)
-
-        if self.training:
-            self.save_forward_states()
-            self.remove_forward_hooks()
-
-        # Return output
-        return x
-
-
-class GradLifMLP(tnn.Module):
-    """
-    Simple MLP using Leaky-Integrate-And-Fire Neurons
-    """
-
-    def __init__(self, n_channels, n_outputs, beta, spike_grad, **kwargs):
-        super().__init__()
-
-        # Classifier
+        # Classifier: 2 conv layers + 1 linear layer, all with LIF neurons
         self.classifier = tnn.Sequential(
-            tnn.Linear(n_channels, 1000),
-            snn.Leaky(beta=beta, init_hidden=True, spike_grad=spike_grad, **kwargs),
-            tnn.Linear(1000, 1000),
-            snn.Leaky(beta=beta, init_hidden=True, spike_grad=spike_grad, **kwargs),
-            tnn.Linear(1000, n_outputs),
-            snn.Leaky(beta=beta, init_hidden=True, spike_grad=spike_grad, output=True),
-        )
-
-        self.forward_handles = []
-
-    def reset(self):
-        snnutils.reset(self.classifier)
-
-    def forward(self, x):
-        """
-        Forwards input through network
-        """
-
-        x = torch.flatten(x, 1)
-        x = self.classifier(x)
-
-        # Return output
-        return x
-
-
-class GradLifCNN(GradLifMLP):
-    """
-    Simple CNN using Leaky-Integrate-And-Fire Neurons
-    """
-
-    def __init__(self, n_channels, n_outputs, beta, spike_grad, **kwargs):
-        super().__init__(n_channels, n_outputs, beta, spike_grad)
-
-        # Classifier
-        self.classifier = tnn.Sequential(
-            tnn.Conv2d(n_channels, 12, 5),
+            SpikingLayer(
+                NoisyWrapper(tnn.Conv2d(n_channels, 12, 5), self.noise_size, self.apply_noise),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                    **kwargs,
+                ),
+            ),
             tnn.MaxPool2d(2),
-            snn.Leaky(beta=beta, init_hidden=True, spike_grad=spike_grad, **kwargs),
-            tnn.Conv2d(12, 64, 5),
+            SpikingLayer(
+                NoisyWrapper(tnn.Conv2d(12, 64, 5), self.noise_size, self.apply_noise),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                    **kwargs,
+                ),
+            ),
             tnn.MaxPool2d(2),
-            snn.Leaky(beta=beta, init_hidden=True, spike_grad=spike_grad, **kwargs),
             tnn.Flatten(),
-            tnn.Linear(64 * 4 * 4, n_outputs),
-            snn.Leaky(beta=beta, init_hidden=True, spike_grad=spike_grad, output=True),
+            SpikingLayer(
+                NoisyWrapper(
+                    tnn.Linear(1600 if n_channels == 3 else 64 * 4 * 4, n_outputs),
+                    self.noise_size,
+                    self.apply_noise,
+                ),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    output=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                ),
+            ),
         )
 
     def forward(self, x):
         """
-        Forwards input through network
+        Forward input through the CNN.
+
+        Args:
+            x (Tensor): Input tensor.
+
+        Returns:
+            Tensor: Output tensor.
         """
-
         x = self.classifier(x)
-
-        # Return output
         return x
 
 
-# Helper functions
-
-MODEL_MAP = {
-    "lifmlp": LifMLP,
-    "smalllifmlp": SmallLifMLP,
-    "lifcnn": LifCNN,
-    "gradlifmlp": GradLifMLP,
-    "gradlifcnn": GradLifCNN,
-}
-
-BASE_LAYERS = [torch.nn.Linear, torch.nn.Conv2d]
-
-EXCLUDED_MODULE_TYPES = [LifMLP, LifCNN]
-
-
-def init_uniform(m):
-    if isinstance(m, tnn.Linear):
-        torch.nn.init.uniform_(m.weight, 0.0, 1.0)
-
-
-def save_input_hook(module, inp):
+class DeeperSNN(LifCNN):
     """
-    Simple pytorch forward hook that saves input
-    """
-    if isinstance(inp, tuple):
-        tmp_in = inp[0]
-    else:
-        tmp_in = inp
-    tmp_in.requires_grad_()
-    tmp_in.retain_grad()
-    module.stored_x += [tmp_in]
+    Deeper SNN with more convolutional layers.
+    Similar to Deeper2024 from https://github.com/aidinattar/snn
 
-
-def save_output_hook(module, inp, output):
-    """
-    Simple pytorch forward hook that saves output
-    """
-    if isinstance(output, tuple):
-        tmp_out = output[0]
-    else:
-        tmp_out = output
-    tmp_out.requires_grad_()
-    tmp_out.retain_grad()
-    module.stored_out += [tmp_out]
-
-    # None as return value
-    return None
-
-
-def get_model(model_name, n_channels, n_outputs, device, **kwargs):
-    """
-    Gets the correct model
+    Args:
+        n_channels (int): Number of input channels.
+        n_outputs (int): Number of output classes.
+        beta (float): LIF neuron decay parameter.
+        n_linear_inputs (int): Number of inputs to the final linear layer.
     """
 
-    # Check if model_name is supported
-    if model_name not in MODEL_MAP:
-        raise ValueError("Model '{}' is not supported.".format(model_name))
-
-    # Build model
-    if model_name in MODEL_MAP:
-        model = MODEL_MAP[model_name](
-            n_channels=n_channels,
-            n_outputs=n_outputs,
-            **kwargs,
+    def __init__(
+        self,
+        n_channels,
+        n_outputs,
+        beta,
+        surrogate_disable=False,
+        spike_grad=snn.surrogate.atan,
+        noise_size=1e-6,
+        apply_noise=True,
+        reset_delay=True,
+        n_linear_inputs=2500,
+        **kwargs,
+    ):
+        super().__init__(
+            n_channels,
+            n_outputs,
+            beta,
+            surrogate_disable=surrogate_disable,
+            spike_grad=spike_grad,
+            reset_delay=reset_delay,
+            noise_size=noise_size,
+            apply_noise=apply_noise,
         )
 
-    model.reset()  # necessary for SNNs (see snntorch documentation)
-    # Return model on correct device
-    return model.to(device)
+        self.n_linear_inputs = n_linear_inputs
+
+        # Classifier: 5 conv layers + 1 linear layer, all with LIF neurons
+        self.classifier = tnn.Sequential(
+            SpikingLayer(
+                NoisyWrapper(
+                    tnn.Conv2d(n_channels, 30, 3, padding=2, bias=False),
+                    self.noise_size,
+                    self.apply_noise,
+                ),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                    **kwargs,
+                ),
+            ),
+            tnn.MaxPool2d(kernel_size=2, stride=2),
+            SpikingLayer(
+                NoisyWrapper(
+                    tnn.Conv2d(30, 150, 3, padding=1, bias=False),
+                    self.noise_size,
+                    self.apply_noise,
+                ),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                    **kwargs,
+                ),
+            ),
+            tnn.MaxPool2d(kernel_size=2, stride=2),
+            SpikingLayer(
+                NoisyWrapper(
+                    tnn.Conv2d(150, 250, 3, padding=1, bias=False),
+                    self.noise_size,
+                    self.apply_noise,
+                ),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                    **kwargs,
+                ),
+            ),
+            tnn.MaxPool2d(kernel_size=2, stride=2),
+            SpikingLayer(
+                NoisyWrapper(
+                    tnn.Conv2d(250, 200, 3, padding=2, bias=False),
+                    self.noise_size,
+                    self.apply_noise,
+                ),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                    **kwargs,
+                ),
+            ),
+            tnn.MaxPool2d(kernel_size=2, stride=2),
+            SpikingLayer(
+                NoisyWrapper(
+                    tnn.Conv2d(200, 100, 3, padding=2, bias=False),
+                    self.noise_size,
+                    self.apply_noise,
+                ),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                    **kwargs,
+                ),
+            ),
+            tnn.Flatten(),
+            SpikingLayer(
+                NoisyWrapper(
+                    tnn.Linear(self.n_linear_inputs, n_outputs, bias=False),
+                    self.noise_size,
+                    self.apply_noise,
+                ),
+                snn.Leaky(
+                    beta=beta,
+                    init_hidden=True,
+                    output=True,
+                    surrogate_disable=surrogate_disable,
+                    spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                    reset_delay=reset_delay,
+                ),
+            ),
+        )
 
 
-def list_layers(model):
+class ResNet(LifCNN):
     """
-    List module layers
+    ResNet-like architecture using LIF neurons.
+    Similar to ResSNN from https://github.com/aidinattar/snn
+
+    Args:
+        n_channels (int): Number of input channels.
+        n_outputs (int): Number of output classes.
+        beta (float): LIF neuron decay parameter.
+        n_linear_inputs (int): Number of inputs to the final linear layer.
     """
 
-    # Exclude specific types of modules
-    layers = [module for module in model.modules() if type(module) not in [torch.nn.Sequential] + EXCLUDED_MODULE_TYPES]
+    def __init__(
+        self,
+        n_channels,
+        n_outputs,
+        beta,
+        surrogate_disable=False,
+        spike_grad=snn.surrogate.atan,
+        noise_size=1e-6,
+        apply_noise=True,
+        reset_delay=True,
+        n_linear_inputs=1800,
+        **kwargs,
+    ):
+        super().__init__(
+            n_channels,
+            n_outputs,
+            beta,
+            surrogate_disable=surrogate_disable,
+            spike_grad=spike_grad,
+            reset_delay=reset_delay,
+            noise_size=noise_size,
+            apply_noise=apply_noise,
+        )
 
-    return layers
+        self.n_linear_inputs = n_linear_inputs
 
+        # Remove the default classifier from LifCNN
+        del self.classifier
 
-def list_snn_layers(model):
-    """
-    List module layers for SNNs. I.e., layers are returned as tuples
-    of some torch layer and the following snntorch activation layer
-    """
+        # Define ResNet-like blocks with skip connection
+        self.block1 = SpikingLayer(
+            NoisyWrapper(
+                tnn.Conv2d(n_channels, 30, 5, padding=2, bias=False),
+                self.noise_size,
+                self.apply_noise,
+            ),
+            snn.Leaky(
+                beta=beta,
+                init_hidden=True,
+                surrogate_disable=surrogate_disable,
+                spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                reset_delay=reset_delay,
+                **kwargs,
+            ),
+        )
+        self.pool1 = tnn.MaxPool2d(kernel_size=2, stride=2)
+        self.block2 = SpikingLayer(
+            NoisyWrapper(
+                tnn.Conv2d(30, 150, 3, padding=1, bias=False),
+                self.noise_size,
+                self.apply_noise,
+            ),
+            snn.Leaky(
+                beta=beta,
+                init_hidden=True,
+                surrogate_disable=surrogate_disable,
+                spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                reset_delay=reset_delay,
+                **kwargs,
+            ),
+        )
+        self.pool2 = tnn.MaxPool2d(kernel_size=2, stride=2)
+        self.block3 = SpikingLayer(
+            NoisyWrapper(
+                tnn.Conv2d(150, 250, 3, padding=1, bias=False),
+                self.noise_size,
+                self.apply_noise,
+            ),
+            snn.Leaky(
+                beta=beta,
+                init_hidden=True,
+                surrogate_disable=surrogate_disable,
+                spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                reset_delay=reset_delay,
+                **kwargs,
+            ),
+        )
+        self.pool3 = tnn.MaxPool2d(kernel_size=3, stride=3)
+        self.block4 = SpikingLayer(
+            NoisyWrapper(
+                tnn.Conv2d(250, 200, 4, padding=2, bias=False),
+                self.noise_size,
+                self.apply_noise,
+            ),
+            snn.Leaky(
+                beta=beta,
+                init_hidden=True,
+                surrogate_disable=surrogate_disable,
+                spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                reset_delay=reset_delay,
+                **kwargs,
+            ),
+        )
+        # Skip connection from block2 to block3
+        self.skip_connection = SpikingLayer(
+            tnn.Sequential(
+                NoisyWrapper(
+                    tnn.Conv2d(150, 250, 1, bias=False),
+                    self.noise_size,
+                    self.apply_noise,
+                ),
+                Interpolate(size=(8, 8), mode="nearest"),
+            ),
+            snn.Leaky(
+                beta=beta,
+                init_hidden=True,
+                surrogate_disable=surrogate_disable,
+                spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                reset_delay=reset_delay,
+                **kwargs,
+            ),
+        )
+        self.flatten = tnn.Flatten()
+        self.fc = SpikingLayer(
+            NoisyWrapper(
+                tnn.Linear(self.n_linear_inputs, n_outputs, bias=False),
+                self.noise_size,
+                self.apply_noise,
+            ),
+            snn.Leaky(
+                beta=beta,
+                init_hidden=True,
+                output=True,
+                surrogate_disable=surrogate_disable,
+                spike_grad=SPIKE_GRAD_MAP[spike_grad](),
+                reset_delay=reset_delay,
+            ),
+        )
 
-    # Exclude specific types of modules
-    layers = [module for module in model.modules() if type(module) not in [torch.nn.Sequential] + EXCLUDED_MODULE_TYPES]
+    def forward(self, x):
+        """
+        Forward input through the ResNet-like SNN.
 
-    # Go through layers, grouping each snntorch layer with the preceding torch layer
-    rev_layers = layers[::-1]
-    snnlayers = []
-    for lay, layer in enumerate(rev_layers):
-        if isinstance(layer, snn.SpikingNeuron):
-            next_base_idx = lay
-            base_layer = rev_layers[next_base_idx]
-            tmp = [rev_layers[lay]]
-            while not any([isinstance(base_layer, bl) for bl in BASE_LAYERS]):
-                next_base_idx += 1
-                base_layer = rev_layers[next_base_idx]
-                tmp.append(base_layer)
+        Args:
+            x (Tensor): Input tensor.
 
-            snnlayers.append(tuple(tmp[::-1]))
-
-    return snnlayers[::-1]
-
-
-def clip_gradients(model, clip_update, clip_update_threshold=0.06):
-    """
-    Clips gradients of model parameters (unit-wise) using frobenius norms
-    """
-
-    if clip_update:
-        for layer in list_layers(model):
-            # Get Parameters
-            param_keys = [name for name, _ in layer.named_parameters(recurse=False)]
-
-            summed = 0.0
-            frob_norm_p = 0.0
-            for key in param_keys:
-                val = getattr(layer, key).data
-                if len(val.shape) == 1:
-                    val = val.unsqueeze(1)
-                summed += (val**2).sum(dim=list(range(len(val.shape)))[1:])
-            if len(param_keys) != 0:
-                frob_norm_p = summed.sqrt()
-
-            for key in param_keys:
-                param = getattr(layer, key)
-                param_grads = param.grad
-                if param_grads is not None:
-                    param_grads_shape = param_grads.shape
-                    if len(param_grads_shape) == 1:
-                        param_grads = param_grads.unsqueeze(1)
-                    frob_norm_u = (param_grads**2).sum(dim=list(range(len(param_grads.shape)))[1:]).sqrt()
-                    frob_norm_p_norm = torch.amax(
-                        torch.stack([frob_norm_p, torch.ones_like(frob_norm_p) * 1e-6]),
-                        dim=0,
-                    )
-                    cond = frob_norm_u / frob_norm_p_norm > clip_update_threshold
-                    repl = (
-                        clip_update_threshold
-                        * frob_norm_p_norm
-                        / torch.where(
-                            frob_norm_u == 0,
-                            torch.ones_like(frob_norm_u) * 1e-6,
-                            frob_norm_u,
-                        )
-                    )
-
-                    repl = param_grads * repl.view(
-                        param_grads.shape[0],
-                        *[1 for _ in range(len(param_grads.shape))[1:]],
-                    ).repeat(1, *param_grads.shape[1:])
-
-                    param_grads = torch.where(
-                        cond.view(
-                            param_grads.shape[0],
-                            *[1 for _ in range(len(param_grads.shape))[1:]],
-                        ).repeat(1, *param_grads.shape[1:]),
-                        repl,
-                        param_grads,
-                    )
-                    param_grads = param_grads.view(param_grads_shape)
-                    param.grad = param_grads
+        Returns:
+            Tensor: Output tensor.
+        """
+        x = self.block1(x)
+        x = self.pool1(x)
+        x = self.block2(x)
+        x = self.pool2(x)
+        x_skip = self.skip_connection(x)
+        x = self.block3(x)
+        # Residual connection: element-wise max
+        x = torch.max(x, x_skip).float()
+        x = self.pool3(x)
+        x = self.block4(x)
+        x = self.flatten(x)
+        x = self.fc(x)
+        return x

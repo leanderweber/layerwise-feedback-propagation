@@ -1,7 +1,7 @@
 mkdir -p /mnt/output
 mkdir -p /mnt/input
-cd /mnt/layer-wise-feedback-propagation
+cd /mnt/reward-backprop
 
 echo "STARTING JOB $@"
 
-python3 -m run_experiment --config_file "configs/activationfuncs/cluster/$@"
+python3 -m run_resubmission1_experiment --config_file "configs/activationfuncs/cluster/$@"
