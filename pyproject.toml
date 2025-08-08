@@ -91,6 +91,7 @@ version = "1.0.0"
 description = "A package for gradient-free neural network training using LFP"
 readme = "README.md"
 license = { file = "LICENSE" }
+requires-python = ">=3.11"
 authors = [
     { name = "Leander Weber", email = "leander.weber@hhi.fraunhofer.de" },
     { name = "Jim Berend", email = "jim.berend@hhi.fraunhofer.de" },
@@ -121,6 +122,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+
 
 [project.urls]
 Source = "https://github.com/leanderweber/layerwise-feedback-propagation"
@@ -194,3 +196,4 @@ skip-magic-trailing-comma = false
 
 # Like Black, automatically detect the appropriate line ending.
 line-ending = "auto"
+
