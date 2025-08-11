@@ -18,6 +18,9 @@ cluster_run/
 # dev
 temp/
 .ruff_cache/
+.python-version
+*.uv.lock
+main.py
 
 # code coverage
 *.gcno
