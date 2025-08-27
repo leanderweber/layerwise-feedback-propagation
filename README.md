@@ -20,7 +20,7 @@ and naturally handles discrete objectives, such as feedback directly obtained fr
 LFP applies an implicit weight-scaling of updates and only propagates feedback through nonzero connections and activations. This leads to sparsity of updates and the final model, while not sacrificing performance or convergence speed meaningfully compared to gradient descent. The obtained models can be pruned more easily since they represent information more efficiently.
 
 ### :page_with_curl: Paper
-For more details, refer to our [Paper](https://arxiv.org/abs/2308.12053).
+For more details, refer to our [Paper](https://openreview.net/pdf?id=9oToxYVOSW).
 
 If you use this package in your research, please cite
 ```bibtex
